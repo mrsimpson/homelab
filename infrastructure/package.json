@@ -1,0 +1,32 @@
+{
+  "name": "homelab-infrastructure",
+  "version": "1.0.0",
+  "description": "Personal homelab infrastructure as code",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
+    "type-check": "tsc --noEmit",
+    "preview": "pulumi preview",
+    "up": "pulumi up",
+    "destroy": "pulumi destroy",
+    "prepare": "cd .. && husky install"
+  },
+  "keywords": ["pulumi", "kubernetes", "homelab", "infrastructure"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^20.11.0",
+    "husky": "^9.0.11",
+    "lint-staged": "^15.2.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@pulumi/cloudflare": "^5.42.0",
+    "@pulumi/kubernetes": "^4.18.3",
+    "@pulumi/pulumi": "^3.137.0"
+  }
+}

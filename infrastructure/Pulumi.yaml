@@ -1,0 +1,10 @@
+name: homelab
+description: Personal homelab infrastructure as code
+runtime: nodejs
+
+config:
+  # These are configured via `pulumi config set`
+  # Examples:
+  # pulumi config set domain example.com
+  # pulumi config set cloudflareAccountId abc123
+  # pulumi config set cloudflare:apiToken xyz --secret
