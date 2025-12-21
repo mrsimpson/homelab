@@ -6,7 +6,7 @@ Set up your local development environment with automated code quality checks.
 
 ## Prerequisites
 
-- Node.js 18+ installed
+- Node.js 24+ installed
 - Git installed
 
 ## Initial Setup

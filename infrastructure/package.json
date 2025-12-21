@@ -17,12 +17,15 @@
   "keywords": ["pulumi", "kubernetes", "homelab", "infrastructure"],
   "author": "",
   "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@types/node": "^20.11.0",
+    "@types/node": "^24.0.0",
     "husky": "^9.0.11",
     "lint-staged": "^15.2.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.7.0"
   },
   "dependencies": {
     "@pulumi/cloudflare": "^5.42.0",

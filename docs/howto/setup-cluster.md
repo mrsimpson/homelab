@@ -61,14 +61,14 @@ Pulumi TypeScript requires Node.js:
 
 ```bash
 # Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 # macOS
 brew install node
 
 # Verify
-node --version  # Should be v18+ or v20+
+node --version  # Should be v24+
 npm --version
 ```
 
