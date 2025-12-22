@@ -118,8 +118,10 @@ cd homelab/infrastructure
 # Install dependencies
 npm install
 
-# Login to Pulumi (local backend)
-pulumi login file://~/.pulumi
+# Login to Pulumi Cloud
+pulumi login
+# Opens browser for authentication (GitHub or email)
+# Creates free account automatically
 
 # Create a new stack
 pulumi stack init dev
