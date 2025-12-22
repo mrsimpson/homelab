@@ -135,6 +135,11 @@ All with:
 - [ADR 002: Cloudflare Tunnel](docs/adr/002-cloudflare-tunnel-exposure.md) - Why tunnel vs port forwarding
 - [ADR 003: k3s Runtime](docs/adr/003-k3s-runtime.md) - Why Kubernetes for homelab
 - [ADR 004: Component Pattern](docs/adr/004-component-pattern.md) - Reusable infrastructure
+- [ADR 005: Development Tooling](docs/adr/005-development-tooling.md) - Biome, Husky, lint-staged
+- [ADR 006: Testing Strategy](docs/adr/006-testing-strategy.md) - Layered testing approach
+- [ADR 007: Separate App Repositories](docs/adr/007-separate-app-repositories.md) - Published components
+- [ADR 008: Secrets Management](docs/adr/008-secrets-management.md) - External Secrets Operator
+- [ADR 009: Pulumi Cloud State Backend](docs/adr/009-pulumi-cloud-state-backend.md) - State management
 
 ### How-To Guides
 - [Set Up Persistent Storage](docs/howto/setup-persistent-storage.md) - NFS integration

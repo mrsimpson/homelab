@@ -134,6 +134,10 @@ curl -X GET "https://api.cloudflare.com/client/v4/zones" \
 ```bash
 cd homelab/infrastructure
 
+# Login to Pulumi Cloud (state backend)
+# See ADR 009 for details on state management
+pulumi login
+
 # Create new stack (environment)
 pulumi stack init dev
 
@@ -149,6 +153,8 @@ pulumi config set domain yourdomain.com
 ```
 
 **Note:** `--secret` encrypts the value in Pulumi state.
+
+**State Backend:** We use Pulumi Cloud for state management. See [ADR 009: Pulumi Cloud State Backend](../adr/009-pulumi-cloud-state-backend.md) for rationale and migration options.
 
 ### Verify Configuration
 

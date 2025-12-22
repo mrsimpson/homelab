@@ -119,6 +119,7 @@ cd homelab/infrastructure
 npm install
 
 # Login to Pulumi Cloud
+# See ADR 009 for state backend rationale
 pulumi login
 # Opens browser for authentication (GitHub or email)
 # Creates free account automatically
@@ -126,6 +127,8 @@ pulumi login
 # Create a new stack
 pulumi stack init dev
 ```
+
+**Note:** We use Pulumi Cloud for state management. See [ADR 009: Pulumi Cloud State Backend](../adr/009-pulumi-cloud-state-backend.md) for details.
 
 ### 3.3 Configure Stack
 
