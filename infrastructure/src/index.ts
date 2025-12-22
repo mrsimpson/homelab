@@ -13,10 +13,12 @@ export const pulumiStack = pulumi.getStack();
 import * as certManager from "./core/cert-manager";
 import * as ingressNginx from "./core/ingress-nginx";
 import * as cloudflare from "./core/cloudflare";
+import * as externalSecrets from "./core/external-secrets";
 
 // Export core infrastructure outputs
 export const tunnelId = cloudflare.tunnelId;
 export const tunnelCname = cloudflare.tunnelCname;
+export const externalSecretsNamespace = externalSecrets.externalSecretsNamespace;
 
 // Applications - Add your apps here
 import * as helloWorld from "./apps/hello-world";

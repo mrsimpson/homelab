@@ -4,6 +4,7 @@ import * as pulumi from "@pulumi/pulumi";
 import { homelabConfig } from "../config";
 import { letsEncryptIssuer } from "../core/cert-manager";
 import { tunnelCname, tunnelId } from "../core/cloudflare";
+import { externalSecretsOperator } from "../core/external-secrets";
 import { ingressNginx } from "../core/ingress-nginx";
 
 /**
@@ -121,25 +122,54 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 		}
 
 		// Optional: Create OAuth2 Proxy configuration
-		let oauthSecret: k8s.core.v1.Secret | undefined;
+		// Uses External Secrets Operator to pull secrets from Pulumi ESC
+		let oauthSecretName: pulumi.Output<string> | undefined;
 		if (args.oauth) {
-			const cookieSecret = new pulumi.Config().requireSecret("oauthCookieSecret");
-
-			oauthSecret = new k8s.core.v1.Secret(
+			const oauthExternalSecret = new k8s.apiextensions.CustomResource(
 				`${name}-oauth`,
 				{
+					apiVersion: "external-secrets.io/v1beta1",
+					kind: "ExternalSecret",
 					metadata: {
 						name: `${name}-oauth`,
 						namespace: namespace.metadata.name,
 					},
-					stringData: {
-						clientId: args.oauth.clientId,
-						clientSecret: args.oauth.clientSecret,
-						cookieSecret: cookieSecret,
+					spec: {
+						refreshInterval: "1h", // Sync from Pulumi ESC every hour
+						secretStoreRef: {
+							name: "pulumi-esc",
+							kind: "ClusterSecretStore",
+						},
+						target: {
+							name: `${name}-oauth`,
+							creationPolicy: "Owner",
+						},
+						data: [
+							{
+								secretKey: "clientId",
+								remoteRef: {
+									key: `${name}/oauth/clientId`,
+								},
+							},
+							{
+								secretKey: "clientSecret",
+								remoteRef: {
+									key: `${name}/oauth/clientSecret`,
+								},
+							},
+							{
+								secretKey: "cookieSecret",
+								remoteRef: {
+									key: `${name}/oauth/cookieSecret`,
+								},
+							},
+						],
 					},
 				},
-				childOpts,
+				{ ...childOpts, dependsOn: [namespace, externalSecretsOperator] },
 			);
+
+			oauthSecretName = oauthExternalSecret.metadata.name;
 		}
 
 		// Build container list
@@ -173,7 +203,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 		}
 
 		// If OAuth configured, add oauth2-proxy sidecar
-		if (args.oauth && oauthSecret) {
+		if (args.oauth && oauthSecretName) {
 			const oauthProxyContainer: any = {
 				name: "oauth-proxy",
 				image: "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0",
@@ -196,7 +226,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 						name: "OAUTH2_PROXY_CLIENT_ID",
 						valueFrom: {
 							secretKeyRef: {
-								name: oauthSecret.metadata.name,
+								name: oauthSecretName,
 								key: "clientId",
 							},
 						},
@@ -205,7 +235,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 						name: "OAUTH2_PROXY_CLIENT_SECRET",
 						valueFrom: {
 							secretKeyRef: {
-								name: oauthSecret.metadata.name,
+								name: oauthSecretName,
 								key: "clientSecret",
 							},
 						},
@@ -214,7 +244,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 						name: "OAUTH2_PROXY_COOKIE_SECRET",
 						valueFrom: {
 							secretKeyRef: {
-								name: oauthSecret.metadata.name,
+								name: oauthSecretName,
 								key: "cookieSecret",
 							},
 						},
