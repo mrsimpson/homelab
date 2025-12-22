@@ -20,7 +20,8 @@ fi
 curl -sfL https://get.k3s.io | sh -s - \
   --write-kubeconfig-mode 644 \
   --disable traefik \
-  --disable servicelb
+  --disable servicelb \
+  --secrets-encryption
 
 echo "⏳ Waiting for k3s to be ready..."
 sleep 10

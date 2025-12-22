@@ -41,6 +41,11 @@ export const tunnelCname = tunnel.cname;
 const cloudflaredNamespace = new k8s.core.v1.Namespace("cloudflare", {
 	metadata: {
 		name: "cloudflare",
+		labels: {
+			"pod-security.kubernetes.io/enforce": "restricted",
+			"pod-security.kubernetes.io/audit": "restricted",
+			"pod-security.kubernetes.io/warn": "restricted",
+		},
 	},
 });
 

@@ -92,6 +92,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 					labels: {
 						app: name,
 						environment: pulumi.getStack(),
+						// Pod Security Standards enforcement (restricted)
+						"pod-security.kubernetes.io/enforce": "restricted",
+						"pod-security.kubernetes.io/audit": "restricted",
+						"pod-security.kubernetes.io/warn": "restricted",
 					},
 				},
 			},
