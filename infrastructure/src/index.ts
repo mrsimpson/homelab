@@ -1,7 +1,6 @@
 import * as pulumi from "@pulumi/pulumi";
 
 // Main entry point for homelab infrastructure
-// Import your apps here as you create them
 
 const config = new pulumi.Config();
 
@@ -9,11 +8,18 @@ const config = new pulumi.Config();
 export const pulumiProject = pulumi.getProject();
 export const pulumiStack = pulumi.getStack();
 
-// TODO: Import core infrastructure
-// import "./core/cloudflare";
-// import "./core/cert-manager";
-// import "./core/ingress-nginx";
+// Core Infrastructure - These establish the foundation for all apps
+// Order matters: cert-manager and ingress-nginx must be ready before apps deploy
+import * as certManager from "./core/cert-manager";
+import * as ingressNginx from "./core/ingress-nginx";
+import * as cloudflare from "./core/cloudflare";
 
-// TODO: Import applications
-// import "./apps/blog";
-// import "./apps/dashboard";
+// Export core infrastructure outputs
+export const tunnelId = cloudflare.tunnelId;
+export const tunnelCname = cloudflare.tunnelCname;
+
+// Applications - Add your apps here
+import * as helloWorld from "./apps/hello-world";
+
+// Export application URLs for easy access
+export const helloWorldUrl = helloWorld.helloWorldUrl;
