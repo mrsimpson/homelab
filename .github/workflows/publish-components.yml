@@ -1,0 +1,42 @@
+name: Publish Components Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: infrastructure
+        run: npm ci
+
+      - name: Build package
+        working-directory: infrastructure
+        run: npm run build
+
+      - name: Lint and type-check
+        working-directory: infrastructure
+        run: |
+          npm run lint
+          npm run type-check
+
+      - name: Publish to npm
+        working-directory: infrastructure
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

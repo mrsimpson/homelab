@@ -1,8 +1,15 @@
 {
-  "name": "homelab-infrastructure",
-  "version": "1.0.0",
-  "description": "Personal homelab infrastructure as code",
-  "main": "index.js",
+  "name": "@mrsimpson/homelab-components",
+  "version": "0.1.0",
+  "description": "Reusable Pulumi components for secure homelab infrastructure",
+  "main": "dist/components/index.js",
+  "module": "dist/components/index.js",
+  "types": "dist/components/index.d.ts",
+  "files": [
+    "dist/components/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "lint": "biome check src/",
@@ -12,11 +19,28 @@
     "preview": "pulumi preview",
     "up": "pulumi up",
     "destroy": "pulumi destroy",
-    "prepare": "cd .. && husky install"
+    "prepare": "cd .. && husky install",
+    "prepublishOnly": "npm run build && npm run lint && npm run type-check"
   },
-  "keywords": ["pulumi", "kubernetes", "homelab", "infrastructure"],
-  "author": "",
+  "keywords": [
+    "pulumi",
+    "kubernetes",
+    "homelab",
+    "infrastructure",
+    "cloudflare-tunnel",
+    "oauth2-proxy",
+    "k3s"
+  ],
+  "author": "mrsimpson",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrsimpson/homelab.git",
+    "directory": "infrastructure"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=24.0.0"
   },
