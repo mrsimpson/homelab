@@ -44,8 +44,11 @@ new ExposedWebApp("my-app", {
 ### 4. Configure and Deploy
 
 ```bash
+# Login to Pulumi Cloud
+# See ADR 009 for state backend details
+pulumi login
+
 # Initialize stack
-pulumi login file://~/.pulumi
 pulumi stack init dev
 
 # Set configuration (inherit from infrastructure stack)
@@ -57,6 +60,8 @@ pulumi config set --secret cloudflareApiToken <TOKEN>
 # Deploy
 pulumi up
 ```
+
+**Note:** We use Pulumi Cloud for state management. See [ADR 009](../adr/009-pulumi-cloud-state-backend.md) for details and migration options.
 
 ## Examples
 
