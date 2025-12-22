@@ -23,6 +23,8 @@ const namespace = new k8s.core.v1.Namespace("external-secrets", {
 		labels: {
 			name: "external-secrets",
 			"pod-security.kubernetes.io/enforce": "restricted",
+			"pod-security.kubernetes.io/audit": "restricted",
+			"pod-security.kubernetes.io/warn": "restricted",
 		},
 	},
 });
