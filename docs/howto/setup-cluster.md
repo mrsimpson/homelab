@@ -252,7 +252,23 @@ Type `yes` and press Enter.
      ...
 ```
 
-## Step 10: Verify Deployment
+### Step 9b: Second Deployment (Add ClusterIssuer)
+
+After cert-manager is deployed and running, deploy the ClusterIssuer:
+
+```bash
+# Enable ClusterIssuer creation
+pulumi config set homelab:skipClusterIssuer false
+
+# Deploy again to create ClusterIssuer
+pulumi up
+```
+
+This creates the Let's Encrypt ClusterIssuer for automatic TLS certificates.
+
+**Why two steps?** The ClusterIssuer uses cert-manager's validating webhook. On first deployment, the webhook doesn't exist yet, causing preview validation errors. By deploying cert-manager first, then the ClusterIssuer, we avoid this issue.
+
+## Step 11: Verify Deployment
 
 ```bash
 # Check all pods are running
@@ -283,7 +299,7 @@ kubectl logs -n cloudflare deployment/cloudflared
 - Cloudflare Tunnel created
 - Tunnel credentials stored in Kubernetes Secret
 
-## Step 11: Test with Example App (Optional)
+## Step 12: Test with Example App (Optional)
 
 Deploy a test service to verify everything works:
 
