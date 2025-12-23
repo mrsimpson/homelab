@@ -1,6 +1,10 @@
 name: homelab
 description: Personal homelab infrastructure as code
-runtime: nodejs
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+main: packages/infrastructure/src/
 
 config:
   # These are configured via `pulumi config set`

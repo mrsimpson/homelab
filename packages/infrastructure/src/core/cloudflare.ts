@@ -1,3 +1,4 @@
+import * as pulumi from "@pulumi/pulumi";
 import * as cloudflare from "@pulumi/cloudflare";
 import * as k8s from "@pulumi/kubernetes";
 import * as random from "@pulumi/random";
@@ -18,15 +19,18 @@ const tunnelSecret = new random.RandomPassword("tunnel-secret", {
 	special: false,
 });
 
+// Base64 encode the secret (required by Cloudflare)
+const tunnelSecretBase64 = tunnelSecret.result.apply((s) =>
+	Buffer.from(s).toString("base64"),
+);
+
 // Create Cloudflare Tunnel
 export const tunnel = new cloudflare.ZeroTrustTunnelCloudflared(
 	"homelab-tunnel",
 	{
 		accountId: homelabConfig.cloudflare.accountId,
 		name: "homelab-k3s",
-		secret: tunnelSecret.result.apply((s) =>
-			Buffer.from(s).toString("base64"),
-		),
+		secret: tunnelSecretBase64,
 	},
 );
 
@@ -48,20 +52,53 @@ const cloudflaredNamespace = new k8s.core.v1.Namespace("cloudflare", {
 	},
 });
 
-// Store tunnel token as Secret
-const tunnelTokenSecret = new k8s.core.v1.Secret(
-	"tunnel-token",
+// Create tunnel configuration
+// This routes all traffic to the ingress-nginx controller
+const tunnelConfig = new k8s.core.v1.ConfigMap(
+	"tunnel-config",
 	{
 		metadata: {
-			name: "tunnel-token",
+			name: "tunnel-config",
 			namespace: cloudflaredNamespace.metadata.name,
 		},
-		stringData: {
-			token: tunnelToken,
+		data: {
+			"config.yaml": `tunnel: homelab-k3s
+credentials-file: /etc/cloudflared/creds/credentials.json
+
+# Route all traffic to ingress-nginx controller
+# The ingress controller will handle hostname-based routing
+ingress:
+  - service: http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80
+`,
 		},
 	},
 	{
 		dependsOn: [cloudflaredNamespace],
+	},
+);
+
+// Store tunnel credentials as Secret
+const tunnelCredsSecret = new k8s.core.v1.Secret(
+	"tunnel-credentials",
+	{
+		metadata: {
+			name: "tunnel-credentials",
+			namespace: cloudflaredNamespace.metadata.name,
+		},
+		stringData: {
+			"credentials.json": pulumi
+				.all([tunnel.id, tunnelSecretBase64])
+				.apply(([tunnelId, secret]: [string, string]) =>
+					JSON.stringify({
+						AccountTag: homelabConfig.cloudflare.accountId,
+						TunnelSecret: secret,
+						TunnelID: tunnelId,
+					}),
+				),
+		},
+	},
+	{
+		dependsOn: [cloudflaredNamespace, tunnel],
 	},
 );
 
@@ -105,19 +142,20 @@ export const cloudflaredDeployment = new k8s.apps.v1.Deployment(
 								"--no-autoupdate",
 								"--metrics",
 								"0.0.0.0:2000",
+								"--config",
+								"/etc/cloudflared/config/config.yaml",
 								"run",
-								"--token",
-								"$(TUNNEL_TOKEN)",
 							],
-							env: [
+							volumeMounts: [
 								{
-									name: "TUNNEL_TOKEN",
-									valueFrom: {
-										secretKeyRef: {
-											name: tunnelTokenSecret.metadata.name,
-											key: "token",
-										},
-									},
+									name: "config",
+									mountPath: "/etc/cloudflared/config",
+									readOnly: true,
+								},
+								{
+									name: "creds",
+									mountPath: "/etc/cloudflared/creds",
+									readOnly: true,
 								},
 							],
 							// Container security context for restricted PSS
@@ -152,12 +190,32 @@ export const cloudflaredDeployment = new k8s.apps.v1.Deployment(
 							},
 						},
 					],
+					volumes: [
+						{
+							name: "config",
+							configMap: {
+								name: tunnelConfig.metadata.name,
+								items: [
+									{
+										key: "config.yaml",
+										path: "config.yaml",
+									},
+								],
+							},
+						},
+						{
+							name: "creds",
+							secret: {
+								secretName: tunnelCredsSecret.metadata.name,
+							},
+						},
+					],
 				},
 			},
 		},
 	},
 	{
-		dependsOn: [tunnelTokenSecret],
+		dependsOn: [tunnelConfig, tunnelCredsSecret],
 	},
 );
 

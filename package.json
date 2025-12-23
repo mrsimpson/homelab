@@ -1,0 +1,21 @@
+{
+  "name": "homelab-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Homelab infrastructure monorepo",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces",
+    "preview": "npm run preview -w @mrsimpson/homelab-infrastructure",
+    "up": "npm run up -w @mrsimpson/homelab-infrastructure",
+    "destroy": "npm run destroy -w @mrsimpson/homelab-infrastructure"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11"
+  }
+}

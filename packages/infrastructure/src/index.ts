@@ -18,6 +18,29 @@ export const tunnelId = cloudflare.tunnelId;
 export const tunnelCname = cloudflare.tunnelCname;
 export const externalSecretsNamespace = externalSecrets.externalSecretsNamespace;
 
+// Create homelab context with infrastructure dependencies
+import { HomelabContext } from "./lib/homelab-context";
+import { homelabConfig } from "./config";
+import { clusterIssuerName, letsEncryptIssuer } from "./core/cert-manager";
+import { ingressNginx } from "./core/ingress-nginx";
+
+export const homelab = new HomelabContext({
+	cloudflare: {
+		zoneId: homelabConfig.cloudflare.zoneId,
+		tunnelCname: cloudflare.tunnelCname,
+	},
+	tls: {
+		clusterIssuer: letsEncryptIssuer,
+		clusterIssuerName: clusterIssuerName,
+	},
+	ingress: {
+		controller: ingressNginx,
+	},
+	externalSecrets: {
+		operator: externalSecrets.externalSecretsOperator,
+	},
+});
+
 // Applications - Add your apps here
 import * as helloWorld from "./apps/hello-world";
 
