@@ -104,27 +104,141 @@ kubectl get nodes
 
 **Expected:** Same output as Step 1
 
-## Step 6: Create Cloudflare API Token
+## Step 6: Set Up Domain with Cloudflare
+
+You need a domain managed by Cloudflare. You have two options:
+
+### Option A: Domain Already Registered with Cloudflare
+
+If you registered your domain directly with Cloudflare Registrar, you're all set! Skip to Step 7.
+
+### Option B: Domain Registered Elsewhere (Transfer DNS to Cloudflare)
+
+If your domain is registered with another provider (GoDaddy, Namecheap, etc.), you need to point it to Cloudflare's nameservers:
+
+1. **Sign up for Cloudflare** (free plan works)
+   - Go to [cloudflare.com/sign-up](https://cloudflare.com/sign-up)
+
+2. **Add your domain to Cloudflare**
+   - Click "Add a site"
+   - Enter your domain: `yourdomain.com`
+   - Choose the **Free plan**
+   - Cloudflare will scan your existing DNS records
+
+3. **Review DNS records**
+   - Cloudflare shows your current DNS records
+   - Click "Continue" (records will be preserved)
+
+4. **Get Cloudflare nameservers**
+   - Cloudflare assigns you 2 nameservers like:
+     ```
+     name1.cloudflare.com
+     name2.cloudflare.com
+     ```
+   - **Write these down!**
+
+5. **Update nameservers at your registrar**
+
+   **Example for GoDaddy:**
+   - Log in to GoDaddy
+   - Go to "My Products" → "Domains"
+   - Click your domain → "Manage DNS"
+   - Scroll to "Nameservers" → "Change"
+   - Select "Custom" and enter Cloudflare's nameservers
+   - Save changes
+
+   **Example for Namecheap:**
+   - Log in to Namecheap
+   - Go to "Domain List"
+   - Click "Manage" next to your domain
+   - Find "Nameservers" section
+   - Select "Custom DNS"
+   - Enter Cloudflare's nameservers
+   - Save
+
+6. **Wait for DNS propagation**
+   - This can take **2-48 hours** (usually 2-4 hours)
+   - You'll get an email when it's done
+   - Check status: Cloudflare Dashboard → Overview → Status
+
+**Why Cloudflare?**
+- Free SSL/TLS
+- Free DDoS protection
+- Cloudflare Tunnel (no port forwarding needed)
+- Fast DNS resolution
+
+## Step 7: Create Cloudflare API Token
 
 **IMPORTANT:** For Cloudflare Tunnel, you need more than just DNS permissions.
 
-1. Go to [Cloudflare Dashboard → My Profile → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
-2. Click "Create Token"
-3. **Use "Create Additional Tokens" → Start with a template → "Edit Cloudflare Workers"** OR create custom token
-4. **Required Permissions:**
-   - Account > Cloudflare Tunnel > Edit
-   - Zone > DNS > Edit
-   - Zone > Zone > Read
-5. **Account Resources:**
-   - Include > Specific account > `Your Account`
-6. **Zone Resources:**
-   - Include > Specific zone > `yourdomain.com`
-7. Create Token and **copy the token** (shown once)
+### Creating the Token
 
-**Why these permissions?**
-- **Cloudflare Tunnel > Edit**: Create and manage tunnels
+1. Go to [Cloudflare Dashboard → My Profile → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Click **"Create Token"**
+3. Click **"Create Custom Token"** (NOT a template - templates don't include Tunnel permissions)
+
+4. **Configure Token:**
+
+   **Token Name:** `homelab-infrastructure`
+
+   **Permissions:** (Click "Add more" to add each)
+   - **Account** > **Cloudflare Tunnel** > **Edit** ⚠️ CRITICAL!
+   - **Zone** > **DNS** > **Edit**
+   - **Zone** > **Zone** > **Read**
+
+   **Account Resources:**
+   - Include > **Specific account** > Select your account
+
+   **Zone Resources:**
+   - Include > **Specific zone** > Select `yourdomain.com`
+
+   **IP Address Filtering:** (optional)
+   - Leave blank or restrict to your IP
+
+   **TTL:** (optional)
+   - Leave as default or set expiration based on your security policy
+
+5. Click **"Continue to summary"**
+6. Review permissions carefully
+7. Click **"Create Token"**
+8. **COPY THE TOKEN** - shown only once! Save it somewhere safe.
+
+### Why These Permissions?
+
+- **Cloudflare Tunnel > Edit**: Create and manage tunnels (missing this causes "Authentication error 10000")
 - **DNS > Edit**: Create CNAME records pointing to tunnel
 - **Zone > Read**: Read zone information
+
+### Troubleshooting Token Issues
+
+**"Authentication error (10000)" when running pulumi up**
+
+This means your token is missing the Cloudflare Tunnel permission. Solutions:
+
+1. **Check your token permissions:**
+   - Go to [API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+   - Find your token → Click "Edit"
+   - Verify "Account > Cloudflare Tunnel > Edit" is present
+   - If missing, add it and save
+
+2. **Create a new token:**
+   - Follow the steps above
+   - Make sure to select **Account > Cloudflare Tunnel > Edit**
+   - Update Pulumi config:
+     ```bash
+     pulumi config set cloudflare:apiToken YOUR_NEW_TOKEN --secret
+     ```
+
+3. **Can't find "Cloudflare Tunnel" permission?**
+   - It's under **Account** permissions, not Zone permissions
+   - Look for "Argo Tunnel" or "Cloudflare Tunnel"
+   - Your Cloudflare account must have Tunnel access (all accounts do on Free plan+)
+
+**"Permission denied" or "Invalid token"**
+
+- Token might be expired - create a new one
+- Token might have been revoked - check [API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+- Wrong token copied - create new token and copy carefully
 
 ### Get Cloudflare IDs
 
@@ -139,7 +253,7 @@ curl -X GET "https://api.cloudflare.com/client/v4/zones" \
   -H "Authorization: Bearer YOUR_API_TOKEN" | jq
 ```
 
-## Step 7: Configure Pulumi
+## Step 8: Configure Pulumi
 
 ```bash
 cd homelab/infrastructure
@@ -200,7 +314,7 @@ pulumi config
 # homelab:pulumiAccessToken     ********  secret
 ```
 
-## Step 8: Build Infrastructure Code
+## Step 9: Build Infrastructure Code
 
 Before deploying, compile the TypeScript code:
 
@@ -218,9 +332,17 @@ This compiles TypeScript to JavaScript in the `dist/` directory. Pulumi requires
 
 If there are any type errors, they'll be shown here. Fix them before proceeding.
 
-## Step 9: Deploy Core Infrastructure
+## Step 10: Deploy Core Infrastructure (Two-Step Process)
+
+Due to cert-manager's validating webhook, we need a two-step deployment:
+
+### Step 10a: First Deployment (Without ClusterIssuer)
 
 ```bash
+# Skip ClusterIssuer on first deployment to avoid webhook validation errors
+pulumi config set homelab:skipClusterIssuer true
+
+# Deploy core infrastructure
 pulumi up
 ```
 
@@ -252,7 +374,7 @@ Type `yes` and press Enter.
      ...
 ```
 
-### Step 9b: Second Deployment (Add ClusterIssuer)
+### Step 10b: Second Deployment (Add ClusterIssuer)
 
 After cert-manager is deployed and running, deploy the ClusterIssuer:
 
