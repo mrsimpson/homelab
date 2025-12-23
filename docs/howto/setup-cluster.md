@@ -143,18 +143,18 @@ pulumi stack init dev
 
 # Configure Cloudflare
 pulumi config set cloudflare:apiToken YOUR_CF_API_TOKEN --secret
-pulumi config set cloudflareAccountId YOUR_ACCOUNT_ID
-pulumi config set cloudflareZoneId YOUR_ZONE_ID
-pulumi config set domain yourdomain.com
+pulumi config set homelab:cloudflareAccountId YOUR_ACCOUNT_ID
+pulumi config set homelab:cloudflareZoneId YOUR_ZONE_ID
+pulumi config set homelab:domain yourdomain.com
 
 # Configure Pulumi ESC for External Secrets Operator
 # See ADR 008 for details on secrets management
-pulumi config set pulumiOrganization YOUR_PULUMI_ORG
-pulumi config set pulumiAccessToken YOUR_PULUMI_TOKEN --secret
+pulumi config set homelab:pulumiOrganization YOUR_PULUMI_ORG
+pulumi config set homelab:pulumiAccessToken YOUR_PULUMI_TOKEN --secret
 
 # Optional: Configure NFS storage
-# pulumi config set nfsServer 192.168.1.100
-# pulumi config set nfsPath /volume1/k3s
+# pulumi config set homelab:nfsServer 192.168.1.100
+# pulumi config set homelab:nfsPath /volume1/k3s
 ```
 
 **Note:** `--secret` encrypts the value in Pulumi state.
@@ -182,12 +182,12 @@ pulumi config set pulumiAccessToken YOUR_PULUMI_TOKEN --secret
 pulumi config
 
 # Should show:
-# cloudflare:apiToken       ********  secret
-# cloudflareAccountId       abc123
-# cloudflareZoneId          def456
-# domain                    yourdomain.com
-# pulumiOrganization        your-org
-# pulumiAccessToken         ********  secret
+# cloudflare:apiToken           ********  secret
+# homelab:cloudflareAccountId   abc123
+# homelab:cloudflareZoneId      def456
+# homelab:domain                yourdomain.com
+# homelab:pulumiOrganization    your-org
+# homelab:pulumiAccessToken     ********  secret
 ```
 
 ## Step 8: Build Infrastructure Code
