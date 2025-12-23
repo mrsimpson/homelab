@@ -9,13 +9,26 @@ import * as k8s from "@pulumi/kubernetes";
  * - ClusterIssuer for production certificates
  */
 
+// Create namespace for cert-manager
+const namespace = new k8s.core.v1.Namespace("cert-manager-ns", {
+	metadata: {
+		name: "cert-manager",
+		labels: {
+			name: "cert-manager",
+			"pod-security.kubernetes.io/enforce": "baseline",
+			"pod-security.kubernetes.io/audit": "baseline",
+			"pod-security.kubernetes.io/warn": "baseline",
+		},
+	},
+});
+
 // Install cert-manager via Helm
 export const certManager = new k8s.helm.v3.Chart(
 	"cert-manager",
 	{
 		chart: "cert-manager",
 		version: "v1.14.0",
-		namespace: "cert-manager",
+		namespace: namespace.metadata.name,
 		fetchOpts: {
 			repo: "https://charts.jetstack.io",
 		},
@@ -29,7 +42,7 @@ export const certManager = new k8s.helm.v3.Chart(
 		},
 	},
 	{
-		dependsOn: [],
+		dependsOn: [namespace],
 	},
 );
 
