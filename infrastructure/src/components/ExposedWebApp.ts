@@ -366,7 +366,13 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 			{ ...childOpts, dependsOn: [this.deployment] },
 		);
 
-		// Create Ingress
+		// Build dependsOn list - filter out undefined resources
+		const ingressDeps: pulumi.Resource[] = [this.service, ingressNginx];
+		if (letsEncryptIssuer) {
+			ingressDeps.push(letsEncryptIssuer);
+		}
+
+		// Update ingress dependency
 		this.ingress = new k8s.networking.v1.Ingress(
 			`${name}-ingress`,
 			{
@@ -374,19 +380,22 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 					name: name,
 					namespace: namespace.metadata.name,
 					annotations: {
-						"cert-manager.io/cluster-issuer": "letsencrypt-prod",
-						"external-dns.alpha.kubernetes.io/target": tunnelCname,
+						"cert-manager.io/cluster-issuer": letsEncryptIssuer
+							? "letsencrypt-prod"
+							: "skip", // Skip TLS if no issuer
 						"nginx.ingress.kubernetes.io/ssl-redirect": "true",
 					},
 				},
 				spec: {
 					ingressClassName: "nginx",
-					tls: [
-						{
-							hosts: [args.domain],
-							secretName: `${name}-tls`,
-						},
-					],
+					tls: letsEncryptIssuer
+						? [
+								{
+									hosts: [args.domain],
+									secretName: `${name}-tls`,
+								},
+							]
+						: undefined,
 					rules: [
 						{
 							host: args.domain,
@@ -412,7 +421,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 			},
 			{
 				...childOpts,
-				dependsOn: [this.service, ingressNginx, letsEncryptIssuer],
+				dependsOn: ingressDeps,
 			},
 		);
 
