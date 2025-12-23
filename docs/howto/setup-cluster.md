@@ -147,6 +147,11 @@ pulumi config set cloudflareAccountId YOUR_ACCOUNT_ID
 pulumi config set cloudflareZoneId YOUR_ZONE_ID
 pulumi config set domain yourdomain.com
 
+# Configure Pulumi ESC for External Secrets Operator
+# See ADR 008 for details on secrets management
+pulumi config set pulumiOrganization YOUR_PULUMI_ORG
+pulumi config set pulumiAccessToken YOUR_PULUMI_TOKEN --secret
+
 # Optional: Configure NFS storage
 # pulumi config set nfsServer 192.168.1.100
 # pulumi config set nfsPath /volume1/k3s
@@ -156,16 +161,33 @@ pulumi config set domain yourdomain.com
 
 **State Backend:** We use Pulumi Cloud for state management. See [ADR 009: Pulumi Cloud State Backend](../adr/009-pulumi-cloud-state-backend.md) for rationale and migration options.
 
+**Secrets Backend:** External Secrets Operator uses Pulumi ESC to manage application secrets. See [ADR 008: Secrets Management](../adr/008-secrets-management.md) for architecture details.
+
+### Getting Your Pulumi Organization and Access Token
+
+**Pulumi Organization:**
+1. Go to [Pulumi Console](https://app.pulumi.com/)
+2. Your organization name is in the URL: `https://app.pulumi.com/<org-name>`
+
+**Pulumi Access Token:**
+1. Go to [Pulumi Console → Settings → Access Tokens](https://app.pulumi.com/account/tokens)
+2. Click "Create token"
+3. Name: `homelab-external-secrets`
+4. Expiration: Set based on your security policy
+5. Copy the token (shown once)
+
 ### Verify Configuration
 
 ```bash
 pulumi config
 
 # Should show:
-# cloudflare:apiToken    ********  secret
-# cloudflareAccountId    abc123
-# cloudflareZoneId       def456
-# domain                 yourdomain.com
+# cloudflare:apiToken       ********  secret
+# cloudflareAccountId       abc123
+# cloudflareZoneId          def456
+# domain                    yourdomain.com
+# pulumiOrganization        your-org
+# pulumiAccessToken         ********  secret
 ```
 
 ## Step 8: Build Infrastructure Code
