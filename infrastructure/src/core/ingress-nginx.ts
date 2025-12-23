@@ -10,12 +10,14 @@ import * as k8s from "@pulumi/kubernetes";
  */
 
 // Create namespace for ingress-nginx
+// Note: Using "privileged" because ingress-nginx requires hostNetwork and hostPort
+// This is necessary for k3s which doesn't have a LoadBalancer service
 const namespace = new k8s.core.v1.Namespace("ingress-nginx-ns", {
 	metadata: {
 		name: "ingress-nginx",
 		labels: {
 			name: "ingress-nginx",
-			"pod-security.kubernetes.io/enforce": "baseline",
+			"pod-security.kubernetes.io/enforce": "privileged",
 			"pod-security.kubernetes.io/audit": "baseline",
 			"pod-security.kubernetes.io/warn": "baseline",
 		},

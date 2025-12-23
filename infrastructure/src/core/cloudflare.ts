@@ -87,6 +87,15 @@ export const cloudflaredDeployment = new k8s.apps.v1.Deployment(
 					},
 				},
 				spec: {
+					// Security context for restricted Pod Security Standard
+					securityContext: {
+						runAsNonRoot: true,
+						runAsUser: 65532, // nonroot user
+						fsGroup: 65532,
+						seccompProfile: {
+							type: "RuntimeDefault",
+						},
+					},
 					containers: [
 						{
 							name: "cloudflared",
@@ -111,6 +120,18 @@ export const cloudflaredDeployment = new k8s.apps.v1.Deployment(
 									},
 								},
 							],
+							// Container security context for restricted PSS
+							securityContext: {
+								allowPrivilegeEscalation: false,
+								runAsNonRoot: true,
+								runAsUser: 65532,
+								capabilities: {
+									drop: ["ALL"],
+								},
+								seccompProfile: {
+									type: "RuntimeDefault",
+								},
+							},
 							livenessProbe: {
 								httpGet: {
 									path: "/ready",
