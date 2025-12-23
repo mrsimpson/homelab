@@ -20,6 +20,9 @@ export const homelabConfig = {
 	// Domain configuration
 	domain: config.require("domain"), // e.g., "example.com"
 
+	// Email for Let's Encrypt certificates
+	email: config.require("email"), // e.g., "admin@example.com"
+
 	// Optional: NFS storage configuration
 	nfs: {
 		server: config.get("nfsServer"), // e.g., "192.168.1.100"

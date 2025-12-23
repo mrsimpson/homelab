@@ -1,5 +1,6 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
+import { homelabConfig } from "../config";
 
 /**
  * cert-manager - Automatic TLS certificate management
@@ -70,7 +71,7 @@ if (!skipClusterIssuer) {
 			spec: {
 				acme: {
 					server: "https://acme-v02.api.letsencrypt.org/directory",
-					email: "admin@example.com", // TODO: Make configurable
+					email: homelabConfig.email,
 					privateKeySecretRef: {
 						name: "letsencrypt-prod",
 					},
