@@ -106,15 +106,25 @@ kubectl get nodes
 
 ## Step 6: Create Cloudflare API Token
 
+**IMPORTANT:** For Cloudflare Tunnel, you need more than just DNS permissions.
+
 1. Go to [Cloudflare Dashboard → My Profile → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
 2. Click "Create Token"
-3. Use "Edit zone DNS" template
-4. Permissions:
+3. **Use "Create Additional Tokens" → Start with a template → "Edit Cloudflare Workers"** OR create custom token
+4. **Required Permissions:**
+   - Account > Cloudflare Tunnel > Edit
    - Zone > DNS > Edit
    - Zone > Zone > Read
-5. Zone Resources:
+5. **Account Resources:**
+   - Include > Specific account > `Your Account`
+6. **Zone Resources:**
    - Include > Specific zone > `yourdomain.com`
-6. Create Token and **copy the token** (shown once)
+7. Create Token and **copy the token** (shown once)
+
+**Why these permissions?**
+- **Cloudflare Tunnel > Edit**: Create and manage tunnels
+- **DNS > Edit**: Create CNAME records pointing to tunnel
+- **Zone > Read**: Read zone information
 
 ### Get Cloudflare IDs
 
