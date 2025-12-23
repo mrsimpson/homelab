@@ -168,7 +168,25 @@ pulumi config
 # domain                 yourdomain.com
 ```
 
-## Step 8: Deploy Core Infrastructure
+## Step 8: Build Infrastructure Code
+
+Before deploying, compile the TypeScript code:
+
+```bash
+npm run build
+```
+
+This compiles TypeScript to JavaScript in the `dist/` directory. Pulumi requires the compiled code to run.
+
+**Expected output:**
+```
+> @mrsimpson/homelab-components@0.1.0 build
+> tsc
+```
+
+If there are any type errors, they'll be shown here. Fix them before proceeding.
+
+## Step 9: Deploy Core Infrastructure
 
 ```bash
 pulumi up
@@ -202,7 +220,7 @@ Type `yes` and press Enter.
      ...
 ```
 
-## Step 9: Verify Deployment
+## Step 10: Verify Deployment
 
 ```bash
 # Check all pods are running
@@ -233,7 +251,7 @@ kubectl logs -n cloudflare deployment/cloudflared
 - Cloudflare Tunnel created
 - Tunnel credentials stored in Kubernetes Secret
 
-## Step 10: Test with Example App (Optional)
+## Step 11: Test with Example App (Optional)
 
 Deploy a test service to verify everything works:
 
@@ -249,6 +267,9 @@ export const testApp = new ExposedWebApp("test", {
 ```
 
 ```bash
+# Build the updated code
+npm run build
+
 # Deploy
 pulumi up
 
