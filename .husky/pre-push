@@ -1,9 +1,5 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 # Run Pulumi preview to catch infrastructure errors before push
 echo "🔍 Running Pulumi preview..."
-cd infrastructure || exit 1
 
 # Check if Pulumi is available
 if ! command -v pulumi &> /dev/null; then
@@ -11,7 +7,7 @@ if ! command -v pulumi &> /dev/null; then
   exit 0
 fi
 
-# Run preview (non-interactive)
+# Run preview from repository root (Pulumi.yaml is now at root)
 if ! pulumi preview --non-interactive --suppress-outputs; then
   echo "❌ Pulumi preview failed! Fix errors before pushing."
   exit 1
