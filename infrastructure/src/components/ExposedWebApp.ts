@@ -3,7 +3,7 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { homelabConfig } from "../config";
 import { letsEncryptIssuer } from "../core/cert-manager";
-import { tunnelCname, tunnelId } from "../core/cloudflare";
+import { tunnelCname } from "../core/cloudflare";
 import { externalSecretsOperator } from "../core/external-secrets";
 import { ingressNginx } from "../core/ingress-nginx";
 
@@ -53,7 +53,7 @@ export interface StorageConfig {
 
 export interface ExposedWebAppArgs {
 	image: string;
-	domain: string;
+	domain: string | pulumi.Output<string>;
 	port: number;
 	replicas?: number;
 	env?: Array<{ name: string; value: string | pulumi.Output<string> }>;
@@ -71,7 +71,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 	public readonly service: k8s.core.v1.Service;
 	public readonly ingress: k8s.networking.v1.Ingress;
 	public readonly dnsRecord: cloudflare.Record;
-	public readonly tunnelRoute: cloudflare.ZeroTrustTunnelCloudflaredRoute;
 	public readonly pvc?: k8s.core.v1.PersistentVolumeClaim;
 
 	constructor(
@@ -417,7 +416,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 			},
 		);
 
-		// Create Cloudflare DNS record
+		// Create Cloudflare DNS record pointing to tunnel
+		// cloudflared automatically routes traffic based on HTTP Host header
 		this.dnsRecord = new cloudflare.Record(
 			`${name}-dns`,
 			{
@@ -426,18 +426,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 				type: "CNAME",
 				content: tunnelCname,
 				proxied: false,
-				comment: `Managed by Pulumi - ${name}`,
-			},
-			childOpts,
-		);
-
-		// Create Cloudflare Tunnel route
-		this.tunnelRoute = new cloudflare.ZeroTrustTunnelCloudflaredRoute(
-			`${name}-tunnel-route`,
-			{
-				accountId: homelabConfig.cloudflare.accountId,
-				tunnelId: tunnelId,
-				network: args.domain,
 				comment: `Managed by Pulumi - ${name}`,
 			},
 			childOpts,
