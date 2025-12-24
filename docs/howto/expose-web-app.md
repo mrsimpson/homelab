@@ -15,31 +15,41 @@ Make a containerized web application accessible from the internet via HTTPS with
 ### 1. Create Application File
 
 ```bash
-cd homelab/infrastructure/src/apps
-touch my-app.ts
+mkdir -p packages/apps/my-app/src
+cd packages/apps/my-app
+touch package.json tsconfig.json src/index.ts
 ```
 
-Edit `my-app.ts`:
+Create `packages/apps/my-app/src/index.ts`:
 
 ```typescript
-import { ExposedWebApp } from "../components/ExposedWebApp";
+import { homelabConfig } from "@mrsimpson/homelab-config";
+import type { HomelabContext } from "@mrsimpson/homelab-core-components";
+import * as pulumi from "@pulumi/pulumi";
 
-export const myApp = new ExposedWebApp("my-app", {
-  image: "nginx:alpine",
-  domain: "app.yourdomain.com",
-  port: 80
-});
+export function createMyApp(homelab: HomelabContext) {
+  const domain = "app.yourdomain.com";
+  
+  const app = homelab.createExposedWebApp("my-app", {
+    image: "nginx:alpine",
+    domain,
+    port: 80
+  });
+  
+  return { app, url: pulumi.interpolate`https://${domain}` };
+}
 ```
 
-### 2. Import in Main File
+### 2. Import in Root
 
-Edit `infrastructure/src/index.ts`:
+Edit `src/index.ts`:
 
 ```typescript
 // ... existing imports
+import { createMyApp } from "@mrsimpson/homelab-app-my-app";
 
-// Add your app
-import "./apps/my-app";
+const myAppResult = createMyApp(homelab);
+export const myAppUrl = myAppResult.url;
 ```
 
 ### 3. Deploy

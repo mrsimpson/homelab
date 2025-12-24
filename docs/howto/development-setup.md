@@ -14,7 +14,7 @@ Set up your local development environment with automated code quality checks.
 ### 1. Install Dependencies
 
 ```bash
-cd homelab/infrastructure
+cd homelab
 npm install
 ```
 
@@ -52,7 +52,7 @@ $ git commit -m "Add blog component"
 
 ✔ Preparing lint-staged...
 ✔ Running tasks for staged files...
-  ✔ infrastructure/src/**/*.{ts,tsx} — 2 files
+  ✔ src/**/*.{ts,tsx} — 2 files
     ✔ biome check --write --organize-imports-enabled=true
     ✔ tsc --noEmit
 ✔ Applying modifications from tasks...
@@ -134,7 +134,7 @@ npm run destroy
 
 ## Biome Configuration
 
-Located in `infrastructure/biome.json`:
+Located in `biome.json` (root):
 
 ```json
 {
@@ -166,7 +166,7 @@ Located in `infrastructure/biome.json`:
 
 ## TypeScript Configuration
 
-Located in `infrastructure/tsconfig.json`:
+Located in `tsconfig.json` (root):
 
 ```json
 {
@@ -235,8 +235,7 @@ tsc --noEmit src/components/ExposedWebApp.ts
 
 ```bash
 # Run preview manually to see full output
-cd infrastructure
-pulumi preview
+npm run preview
 
 # Skip pre-push hook if needed (not recommended)
 git push --no-verify

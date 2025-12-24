@@ -23,7 +23,7 @@ This guide covers migrating from Pulumi Cloud to a self-hosted S3 backend (MinIO
 **Using Pulumi (with current Pulumi Cloud state):**
 
 ```typescript
-// infrastructure/src/core/minio.ts
+// packages/core/infrastructure/src/minio/index.ts
 import * as k8s from "@pulumi/kubernetes";
 
 const minioNamespace = new k8s.core.v1.Namespace("minio", {
@@ -68,7 +68,6 @@ export const minioEndpoint = "https://minio.example.com";
 
 **Deploy MinIO:**
 ```bash
-cd infrastructure
 pulumi up  # Still using Pulumi Cloud at this point
 ```
 
@@ -91,8 +90,6 @@ mc ls homelab-minio
 ### Step 3: Export State from Pulumi Cloud
 
 ```bash
-cd infrastructure
-
 # Export all stacks
 for stack in dev staging prod; do
   pulumi stack select $stack
@@ -214,7 +211,6 @@ pulumi stack rm dev  # Confirm deletion
 ### Step 2: Export State
 
 ```bash
-cd infrastructure
 pulumi stack export --file state-backup-$(date +%Y%m%d).json
 ```
 

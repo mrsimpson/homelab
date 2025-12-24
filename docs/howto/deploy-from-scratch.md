@@ -293,7 +293,7 @@ The application is accessible via Cloudflare Tunnel's outbound connection only.
 
 ```bash
 # Edit the hello-world app
-vim infrastructure/src/apps/hello-world.ts
+vim packages/apps/hello-world/src/index.ts
 
 # Preview changes
 pulumi preview
@@ -307,32 +307,37 @@ pulumi up
 Create a new app file:
 
 ```typescript
-// infrastructure/src/apps/my-app.ts
-import { ExposedWebApp } from "../components/ExposedWebApp";
-import { homelabConfig } from "../config";
+// packages/apps/my-app/src/index.ts
+import { createExposedWebApp } from "@mrsimpson/homelab-core-components";
+import { homelabConfig } from "@mrsimpson/homelab-config";
 import * as pulumi from "@pulumi/pulumi";
 
-export const myApp = new ExposedWebApp("my-app", {
-  image: "my-app:latest",
-  domain: pulumi.interpolate`my-app.${homelabConfig.domain}`,
-  port: 3000,
-  replicas: 2,
-  oauth: {
-    provider: "google",
-    clientId: "your-client-id",
-    clientSecret: pulumi.secret("your-client-secret"),
-    allowedEmails: ["admin@example.com"]
-  }
-});
+export function createMyApp(homelab: any) {
+  const domain = pulumi.interpolate`my-app.${homelabConfig.domain}`;
+  
+  const app = homelab.createExposedWebApp("my-app", {
+    image: "my-app:latest",
+    domain,
+    port: 3000,
+    replicas: 2,
+    oauth: {
+      provider: "google",
+      clientId: "your-client-id",
+      clientSecret: pulumi.secret("your-client-secret"),
+      allowedEmails: ["admin@example.com"]
+    }
+  });
+  
+  return { app, url: pulumi.interpolate`https://${domain}` };
+}
 ```
 
-Import in `index.ts`:
+Import in root `src/index.ts`:
 
 ```typescript
-import * as myApp from "./apps/my-app";
-export const myAppUrl = myApp.myApp.ingress.spec.apply(
-  spec => `https://${spec.rules[0].host}`
-);
+import { createMyApp } from "@mrsimpson/homelab-app-my-app";
+const myAppResult = createMyApp(homelab);
+export const myAppUrl = myAppResult.url;
 ```
 
 Deploy:

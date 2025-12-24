@@ -140,7 +140,6 @@ image: "nginx:1.25.3"
 ### Preview with Policies
 
 ```bash
-cd infrastructure
 pulumi preview --policy-pack policy/
 ```
 

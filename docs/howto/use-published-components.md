@@ -206,4 +206,4 @@ npm install @pulumi/kubernetes @pulumi/cloudflare
 
 ## Component API Reference
 
-See [ExposedWebApp component source](https://github.com/mrsimpson/homelab/blob/main/infrastructure/src/components/ExposedWebApp.ts) for full API documentation.
+See [ExposedWebApp component source](https://github.com/mrsimpson/homelab/blob/main/packages/core/components/src/ExposedWebApp.ts) for full API documentation.

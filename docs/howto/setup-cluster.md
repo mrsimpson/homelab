@@ -426,14 +426,18 @@ kubectl logs -n cloudflare deployment/cloudflared
 Deploy a test service to verify everything works:
 
 ```typescript
-// infrastructure/src/apps/test.ts
-import { ExposedWebApp } from "../components/ExposedWebApp";
+// packages/apps/test/src/index.ts
+import type { HomelabContext } from "@mrsimpson/homelab-core-components";
 
-export const testApp = new ExposedWebApp("test", {
-  image: "nginxdemos/hello:latest",
-  domain: "test.yourdomain.com",
-  port: 80
-});
+export function createTestApp(homelab: HomelabContext) {
+  const app = homelab.createExposedWebApp("test", {
+    image: "nginxdemos/hello:latest",
+    domain: "test.yourdomain.com",
+    port: 80
+  });
+  
+  return app;
+}
 ```
 
 ```bash

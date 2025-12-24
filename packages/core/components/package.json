@@ -1,0 +1,50 @@
+{
+  "name": "@mrsimpson/homelab-core-components",
+  "version": "0.1.0",
+  "description": "Reusable Pulumi components for secure homelab infrastructure",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "pulumi",
+    "kubernetes",
+    "homelab",
+    "infrastructure",
+    "cloudflare-tunnel",
+    "cert-manager",
+    "oauth2-proxy"
+  ],
+  "author": "mrsimpson",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrsimpson/homelab.git",
+    "directory": "packages/core/components"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "@pulumi/cloudflare": "^5.42.0",
+    "@pulumi/kubernetes": "^4.18.3",
+    "@pulumi/pulumi": "^3.137.0"
+  }
+}

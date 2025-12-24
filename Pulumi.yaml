@@ -4,7 +4,7 @@ runtime:
   name: nodejs
   options:
     typescript: true
-main: packages/infrastructure/src/
+main: src/
 
 config:
   # These are configured via `pulumi config set`

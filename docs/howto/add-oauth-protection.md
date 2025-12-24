@@ -82,7 +82,7 @@ pulumi config set myAppOIDCIssuerURL https://auth.example.com/realms/myrealm
 
 ## Step 3: Update Application Code
 
-Edit your app file (e.g., `infrastructure/src/apps/my-app.ts`):
+Edit your app file (e.g., `packages/apps/my-app/src/index.ts`):
 
 ```typescript
 import { ExposedWebApp } from "../components/ExposedWebApp";
