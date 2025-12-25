@@ -19,7 +19,8 @@ SSH into your Linux machine and install k3s:
 ```bash
 curl -sfL https://get.k3s.io | sh -s - \
   --write-kubeconfig-mode 644 \
-  --disable traefik
+  --disable traefik \
+  --secrets-encryption
 
 # Wait for k3s to start (~30 seconds)
 systemctl status k3s
@@ -34,9 +35,65 @@ NAME      STATUS   ROLES                  AGE   VERSION
 homelab   Ready    control-plane,master   30s   v1.28.x+k3s1
 ```
 
-### Why disable Traefik?
+### Installation Options Explained
 
-k3s includes Traefik ingress controller by default, but we use ingress-nginx for better Pulumi integration and consistency with standard Kubernetes.
+- `--write-kubeconfig-mode 644` - Makes kubeconfig readable without sudo
+- `--disable traefik` - We use ingress-nginx instead for better Pulumi integration
+- `--secrets-encryption` - **Encrypts all secrets at rest in etcd** (CRITICAL for security)
+
+### Why Enable Secrets Encryption?
+
+The `--secrets-encryption` flag encrypts all Kubernetes secrets (API tokens, passwords, TLS keys) at rest in the etcd datastore using AES-CBC encryption. This protects sensitive data if someone gains unauthorized access to the etcd files on disk.
+
+**What it protects:**
+- Cloudflare Tunnel credentials
+- OAuth client secrets
+- TLS private keys
+- Database passwords
+- Any other Kubernetes secrets
+
+**Verify encryption is enabled:**
+```bash
+sudo k3s secrets-encrypt status
+
+# Expected output:
+# Encryption Status: Enabled
+# Current Rotation Stage: start
+```
+
+For more details, see the [k3s secrets encryption documentation](https://docs.k3s.io/security/secrets-encryption).
+
+### Enabling Encryption on Existing k3s Installation
+
+If you already have k3s installed without encryption, you can enable it:
+
+```bash
+# Stop k3s
+sudo systemctl stop k3s
+
+# Edit k3s service configuration
+sudo systemctl edit k3s
+
+# Add these lines in the override section:
+[Service]
+ExecStart=
+ExecStart=/usr/local/bin/k3s server --write-kubeconfig-mode 644 --disable traefik --secrets-encryption
+
+# Save and exit (Ctrl+O, Enter, Ctrl+X)
+
+# Start k3s
+sudo systemctl start k3s
+
+# Enable encryption and reencrypt existing secrets
+sudo k3s secrets-encrypt prepare
+sudo k3s secrets-encrypt enable
+sudo k3s secrets-encrypt reencrypt
+
+# Verify all secrets are encrypted
+sudo k3s secrets-encrypt status
+```
+
+**Note:** This process reencrypts all existing secrets in the cluster. It's safe to do on a running cluster.
 
 ## Step 2: Install Pulumi
 
@@ -415,11 +472,18 @@ kubectl logs -n cloudflare deployment/cloudflared
 - **cert-manager** - Automatic TLS certificates from Let's Encrypt
 - **ingress-nginx** - HTTP(S) routing and load balancing
 - **cloudflared** - Cloudflare Tunnel agent (maintains connection to Cloudflare)
+- **external-secrets** - External Secrets Operator for centralized secret management
 - **democratic-csi** (if NFS configured) - Dynamic storage provisioning
 
 **Cloudflare Resources:**
 - Cloudflare Tunnel created
-- Tunnel credentials stored in Kubernetes Secret
+- Tunnel credentials stored in Kubernetes Secret (encrypted at rest)
+
+**Security Features Enabled:**
+- **etcd secrets encryption** - All Kubernetes secrets encrypted at rest with AES-CBC
+- **Pod Security Standards** - Enforced via namespace labels (restricted/baseline/privileged)
+- **TLS everywhere** - Automatic certificate provisioning and renewal
+- **No inbound ports** - All traffic routed through Cloudflare Tunnel
 
 ## Step 12: Test with Example App (Optional)
 
