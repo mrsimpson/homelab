@@ -1,9 +1,49 @@
 # Critical Review: Homelab Infrastructure
 
-**Date:** 2024-12-22
+**Review Date:** 2024-12-22
+**Last Updated:** 2025-12-25
 **Reviewers:** Security, Ops, and Developer Perspectives
 
 ---
+
+## 📊 Status Update (2025-12-25)
+
+**Progress:** 4 issues resolved, 2 partially resolved, 34 remaining → [View open issues](https://github.com/mrsimpson/homelab/issues)
+
+**Grade:** B+ (up from B-)
+
+### ✅ Resolved Since Review
+
+1. **Issue #5 - Pod Security Standards** ✅
+   - Status: Implemented across all namespaces
+   - Location: All infrastructure + ExposedWebApp component
+
+2. **Issue #2 - etcd Encryption** ✅ [Issue #17](https://github.com/mrsimpson/homelab/issues/17)
+   - Status: `--secrets-encryption` added to setup guide
+   - Location: docs/howto/setup-cluster.md:23
+
+3. **Monorepo Structure** ✅
+   - Status: Complete separation with packages/core, packages/stacks, packages/apps
+
+4. **External Secrets Operator** ✅
+   - Status: Deployed with Pulumi ESC backend
+   - Location: packages/core/infrastructure/src/external-secrets/
+
+### 🔶 Partially Resolved
+
+- **Issue #1 - Secrets Management** - ESO deployed, migration to ESC incomplete
+- **Config Management** - Centralized config package created
+
+### ❌ Critical Issues Still Open
+
+- [#16](https://github.com/mrsimpson/homelab/issues/16) - No network policies (HIGH RISK)
+- [#13](https://github.com/mrsimpson/homelab/issues/13) - No observability stack (CRITICAL)
+- [#14](https://github.com/mrsimpson/homelab/issues/14) - No backup strategy (CRITICAL)
+- [#19](https://github.com/mrsimpson/homelab/issues/19) - No local development mode
+
+---
+
+## Original Review (2024-12-22)
 
 ## 🔒 Security Engineer Perspective
 
