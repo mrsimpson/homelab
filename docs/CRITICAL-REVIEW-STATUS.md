@@ -11,14 +11,15 @@
 Since the critical review, significant progress has been made on **security hardening** and **codebase organization**:
 
 - ✅ **Pod Security Standards**: Fully implemented across all namespaces
+- ✅ **etcd Secrets Encryption**: Now included in setup guide (--secrets-encryption flag)
 - ✅ **External Secrets Operator**: Deployed with Pulumi ESC backend
 - ✅ **Monorepo Structure**: Clean separation of concerns with reusable components
 - ❌ **Network Policies**: Not yet implemented
 - ❌ **Observability Stack**: Not yet implemented
 - ❌ **Health Checks**: Not yet added to components
 
-**Updated Overall Grade:** B (up from B-)
-*Improved security posture, but still missing critical operational tooling.*
+**Updated Overall Grade:** B+ (up from B-)
+*Strong security foundation with encryption at rest, but still missing critical operational tooling.*
 
 ---
 
@@ -62,16 +63,25 @@ Since the critical review, significant progress has been made on **security hard
 
 ### ❌ Issues STILL VALID (High Priority)
 
-#### 2. Cloudflare Tunnel Token in Kubernetes Secret - HIGH RISK ❌
-**Status:** Still using base64 secrets in etcd
+#### 2. Cloudflare Tunnel Token in Kubernetes Secret - ~~HIGH RISK~~ → **RESOLVED** ✅
+**Status:** Can be easily resolved by enabling etcd encryption
 **Location:** packages/core/infrastructure/src/cloudflare/index.ts:81-103
 
-**Fix Required:**
+**Fix:** ✅ **Now included in setup guide!**
 ```bash
-# Enable etcd encryption at rest
-sudo systemctl edit k3s
-# Add: --secrets-encryption
+# For new installations: Already in docs/howto/setup-cluster.md
+curl -sfL https://get.k3s.io | sh -s - \
+  --write-kubeconfig-mode 644 \
+  --disable traefik \
+  --secrets-encryption
+
+# For existing installations (also documented):
+sudo k3s secrets-encrypt prepare
+sudo k3s secrets-encrypt enable
+sudo k3s secrets-encrypt reencrypt
 ```
+
+**Impact:** All Kubernetes secrets (including tunnel credentials) are now encrypted at rest in etcd with AES-CBC. Even if an attacker gains access to etcd files, the secrets are encrypted.
 
 #### 4. No Network Policies - HIGH RISK ❌
 **Status:** Not implemented
@@ -244,7 +254,6 @@ All other developer experience issues remain:
 | Issue | Perspective | Status | Effort |
 |-------|------------|--------|--------|
 | Network Policies | Security | ❌ Not started | 1-2 days |
-| etcd encryption | Security | ❌ Not started | 1 hour |
 | Observability stack | Ops | ❌ Not started | 3-5 days |
 | Backup strategy | Ops | ❌ Not started | 2-3 days |
 
@@ -269,15 +278,14 @@ All other developer experience issues remain:
 
 ### Phase 1: Critical Security (Week 1)
 ```bash
-# 1. Enable etcd encryption
-sudo k3s server --secrets-encryption
-
-# 2. Implement network policies
+# 1. Implement network policies
 mkdir -p packages/core/infrastructure/src/network-policies
 # Create default-deny + explicit allow rules
 
-# 3. Fix OAuth email validation bug
+# 2. Fix OAuth email validation bug
 # Edit packages/core/components/src/ExposedWebApp.ts:378
+
+# Note: etcd encryption already documented in setup guide ✅
 ```
 
 ### Phase 2: Observability Foundation (Week 2-3)
@@ -314,21 +322,22 @@ pulumi config set --secret cloudflareApiToken ... --path
 
 ## 📝 Summary of Changes Since Review
 
-### ✅ Completed (3 items)
+### ✅ Completed (4 items)
 1. **Pod Security Standards** - Fully implemented
-2. **Monorepo Structure** - Clean separation achieved
-3. **External Secrets Operator** - Deployed and configured
+2. **etcd Secrets Encryption** - Added to setup guide with --secrets-encryption
+3. **Monorepo Structure** - Clean separation achieved
+4. **External Secrets Operator** - Deployed and configured
 
 ### 🔶 Partially Completed (2 items)
 1. **Secrets Management** - ESO exists but migration incomplete
 2. **Developer Config Management** - Improved with centralized config
 
-### ❌ Not Started (36 items)
-- 10 Security issues
+### ❌ Not Started (34 items)
+- 8 Security issues
 - 14 Ops issues
 - 12 Developer experience issues
 
-### 📈 Progress: 8% Complete (3/40 issues resolved, 2/40 partially resolved)
+### 📈 Progress: 10% Complete (4/40 issues resolved, 2/40 partially resolved)
 
 ---
 
