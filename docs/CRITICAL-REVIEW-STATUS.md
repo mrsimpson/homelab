@@ -1,365 +1,85 @@
-# Critical Review Status Update
+# Critical Review - Open Issues
 
-**Review Date:** 2024-12-22
-**Status Update:** 2025-12-25
-**Changes Since:** Monorepo refactor and Pod Security Standards implementation
-
----
-
-## Executive Summary
-
-Since the critical review, significant progress has been made on **security hardening** and **codebase organization**:
-
-- ✅ **Pod Security Standards**: Fully implemented across all namespaces
-- ✅ **etcd Secrets Encryption**: Now included in setup guide (--secrets-encryption flag)
-- ✅ **External Secrets Operator**: Deployed with Pulumi ESC backend
-- ✅ **Monorepo Structure**: Clean separation of concerns with reusable components
-- ❌ **Network Policies**: Not yet implemented
-- ❌ **Observability Stack**: Not yet implemented
-- ❌ **Health Checks**: Not yet added to components
-
-**Updated Overall Grade:** B+ (up from B-)
-*Strong security foundation with encryption at rest, but still missing critical operational tooling.*
+**Original Review Date:** 2024-12-22
+**Last Updated:** 2025-12-25
 
 ---
 
-## 🔒 Security Engineer Perspective
+## Summary
 
-### ✅ Issues RESOLVED
+The original critical review (docs/CRITICAL-REVIEW.md) identified 40 issues across security, operations, and developer experience.
 
-#### 5. Pod Security Standards - ~~MEDIUM RISK~~ → **RESOLVED** ✅
-**What was done:**
-- PSS labels added to all infrastructure namespaces:
-  - `cloudflare`: `restricted` (packages/core/infrastructure/src/cloudflare/index.ts:48-50)
-  - `cert-manager`: `baseline` (packages/core/infrastructure/src/cert-manager/index.ts:22-24)
-  - `ingress-nginx`: `privileged` (packages/core/infrastructure/src/ingress-nginx/index.ts:20-22)
-  - `external-secrets`: `restricted` (packages/core/infrastructure/src/external-secrets/index.ts:25-27)
-- **ExposedWebApp component** automatically creates namespaces with `restricted` PSS (packages/core/components/src/ExposedWebApp.ts:148-150)
-- Security contexts properly configured for all workloads
+**Progress:**
+- ✅ **4 issues resolved** (Pod Security Standards, etcd encryption, monorepo structure, ESO deployment)
+- 🔶 **2 partially resolved** (secrets management, config management)
+- ❌ **34 issues remaining**
 
-**Impact:** Applications are now automatically protected by Pod Security Standards. Containers cannot run privileged, must run as non-root, and have seccomp profiles enforced.
-
-### 🔶 Issues PARTIALLY RESOLVED
-
-#### 1. Secrets Management - ~~HIGH RISK~~ → **MEDIUM RISK** 🔶
-**What was done:**
-- External Secrets Operator deployed (packages/core/infrastructure/src/external-secrets/index.ts)
-- Pulumi ESC configured as ClusterSecretStore backend
-- OAuth secrets can now be pulled from external stores
-- ExposedWebApp component supports both ESO and regular secrets (packages/core/components/src/ExposedWebApp.ts:189-263)
-
-**What's still missing:**
-- Pulumi config secrets still stored in stack files (base64 encoded)
-- No secret rotation automation
-- Cloudflare API tokens still in Pulumi config
-- etcd encryption at rest not enabled
-
-**Recommendation:**
-- Migrate all Pulumi config secrets to Pulumi ESC
-- Enable etcd encryption: `k3s server --secrets-encryption`
-- Implement secret rotation for tunnel tokens (90-day cycle)
-
-**Updated Priority:** P0 → P1 (improved but not complete)
-
-### ❌ Issues STILL VALID (High Priority)
-
-#### 2. Cloudflare Tunnel Token in Kubernetes Secret - ~~HIGH RISK~~ → **RESOLVED** ✅
-**Status:** Can be easily resolved by enabling etcd encryption
-**Location:** packages/core/infrastructure/src/cloudflare/index.ts:81-103
-
-**Fix:** ✅ **Now included in setup guide!**
-```bash
-# For new installations: Already in docs/howto/setup-cluster.md
-curl -sfL https://get.k3s.io | sh -s - \
-  --write-kubeconfig-mode 644 \
-  --disable traefik \
-  --secrets-encryption
-
-# For existing installations (also documented):
-sudo k3s secrets-encrypt prepare
-sudo k3s secrets-encrypt enable
-sudo k3s secrets-encrypt reencrypt
-```
-
-**Impact:** All Kubernetes secrets (including tunnel credentials) are now encrypted at rest in etcd with AES-CBC. Even if an attacker gains access to etcd files, the secrets are encrypted.
-
-#### 4. No Network Policies - HIGH RISK ❌
-**Status:** Not implemented
-**Impact:** Lateral movement still possible after pod compromise
-
-**Fix Required:**
-```typescript
-// packages/core/infrastructure/src/network-policies/index.ts
-// 1. Default deny-all policy per namespace
-// 2. Explicit allow rules for required communication
-```
-
-**Priority:** P0 (critical security gap)
-
-#### 7. No RBAC for Applications - MEDIUM RISK ❌
-**Status:** Apps use default ServiceAccount
-**Location:** ExposedWebApp doesn't specify serviceAccountName
-
-**Fix Required:**
-```typescript
-// In ExposedWebApp.ts deployment spec
-serviceAccountName: `${name}-sa`,
-automountServiceAccountToken: false, // Unless needed
-```
-
-### ❌ Issues STILL VALID (Medium/Low Priority)
-
-#### 3. Shared OAuth Cookie Secret - MEDIUM RISK ❌
-**Status:** Still valid, but ESO infrastructure exists to fix it
-**Note:** OAuth cookie secrets are now auto-generated per app (packages/core/components/src/ExposedWebApp.ts:248-256), but still stored in K8s secrets
-
-#### 6. Image Security - MEDIUM RISK ❌
-**Status:** No scanning, no signature verification
-
-#### 8. Cloudflare Sees All Traffic - MEDIUM RISK ❌
-**Status:** Acknowledged design trade-off (no change expected)
-
-#### 9. OAuth Email Validation Bug - LOW RISK ❌
-**Status:** Still present
-**Location:** packages/core/components/src/ExposedWebApp.ts:378
-```typescript
-// Current (validates domain only):
-oauthProxyContainer.args.push(`--email-domain=${email.split("@")[1]}`);
-
-// Should be:
-oauthProxyContainer.args.push(`--authenticated-emails-file=/etc/oauth/emails.txt`);
-```
-
-#### 10-13. Audit Logging, Egress Filtering, Tailscale CI/CD, Long-Lived kubeconfig ❌
-**Status:** All still valid, no changes
+**Current Grade:** B+ (up from B-)
 
 ---
 
-## 🔧 Ops Engineer Perspective
+## What's Been Resolved
 
-### ✅ Issues RESOLVED
+### ✅ Pod Security Standards
+- **What:** Enforced via namespace labels (restricted/baseline/privileged)
+- **Where:** All infrastructure namespaces + ExposedWebApp component
+- **Impact:** Containers cannot run privileged, must run as non-root
 
-**NONE** - All operational issues from the original review remain unaddressed.
+### ✅ etcd Secrets Encryption
+- **What:** `--secrets-encryption` flag added to k3s setup
+- **Where:** docs/howto/setup-cluster.md:23
+- **Impact:** All secrets encrypted at rest in etcd with AES-CBC
 
-### 🔶 Issues PARTIALLY RESOLVED
+### ✅ Monorepo Structure
+- **What:** Clean separation with packages/core, packages/stacks, packages/apps
+- **Impact:** Better code organization and reusability
 
-#### 6. Local Pulumi State - ~~MEDIUM RISK~~ → **STILL VALID** 🔶
-**Note:** While ADR 009 discusses migration to Pulumi Cloud/S3 backend, it's not yet implemented.
-**Status:** Still using `file://~/.pulumi` (assumed)
-
-**Check current backend:**
-```bash
-cd /home/user/homelab
-pulumi whoami -v
-```
-
-### ❌ Issues STILL VALID (Critical)
-
-#### 1. No Observability Stack - CRITICAL ❌
-**Status:** Not implemented
-**Impact:** Cannot debug production, no visibility into performance
-
-**Required:**
-```typescript
-// packages/core/infrastructure/src/observability/index.ts
-- Prometheus (metrics)
-- Loki (logs aggregation)
-- Grafana (visualization)
-- Alertmanager (notifications)
-```
-
-**Priority:** P0 (cannot operate without)
-
-#### 2. No Alerting - CRITICAL ❌
-**Status:** Not implemented
-**Impact:** All issues discovered reactively
-
-#### 3. No Backup Strategy - CRITICAL ❌
-**Status:** Not implemented
-**Impact:** Data loss on disk failure inevitable
-
-**Required:**
-```typescript
-// packages/core/infrastructure/src/backup/index.ts
-- Velero for PV snapshots
-- Daily backups to S3/Backblaze B2
-- Monthly restore tests
-```
-
-#### 4-14. All Other Ops Issues - STILL VALID ❌
-- Single point of failure (no HA)
-- No disaster recovery plan
-- No staging environment
-- No health checks (confirmed: no probes in ExposedWebApp.ts)
-- No resource quotas
-- No dependency scanning
-- Storage not portable
-- No certificate monitoring
-- No GitOps / drift detection
-- No runbooks
+### ✅ External Secrets Operator
+- **What:** ESO deployed with Pulumi ESC backend
+- **Where:** packages/core/infrastructure/src/external-secrets/
+- **Impact:** Foundation for centralized secret management
 
 ---
 
-## 👨‍💻 App Developer Perspective
+## Open Issues
 
-### ✅ Issues RESOLVED
+All remaining issues from the critical review are tracked in GitHub:
 
-**NONE** - Developer experience issues remain unaddressed.
+**View all issues:** https://github.com/mrsimpson/homelab/issues
 
-### 🔶 Issues IMPROVED
+### Priority Breakdown
 
-#### 4. Must Understand Pulumi - ~~MEDIUM~~ → **IMPROVED** 🔶
-**What changed:**
-- Monorepo structure with clear separation (packages/apps/, packages/core/)
-- Better documentation in README files
-- Cleaner component API with HomelabContext for dependency injection
+**P0 (Critical):**
+- [#16](https://github.com/mrsimpson/homelab/issues/16) - No network policies - unrestricted lateral movement
+- [#13](https://github.com/mrsimpson/homelab/issues/13) - No observability stack - cannot debug production issues
+- [#14](https://github.com/mrsimpson/homelab/issues/14) - No backup strategy - data loss on hardware failure
+- [#19](https://github.com/mrsimpson/homelab/issues/19) - No local development mode - slow iteration cycle
 
-**Still challenging:** Learning curve for Pulumi + TypeScript remains
+**P1 (This Quarter):**
+- [#15](https://github.com/mrsimpson/homelab/issues/15) - No alerting - reactive firefighting only
+- [#18](https://github.com/mrsimpson/homelab/issues/18) - No disaster recovery plan - unknown recovery time
+- [#20](https://github.com/mrsimpson/homelab/issues/20) - No log aggregation - cannot debug without kubectl
+- [#21](https://github.com/mrsimpson/homelab/issues/21) - No database component - every app reinvents persistence
+- [#22](https://github.com/mrsimpson/homelab/issues/22) - Local Pulumi state - not backed up, not shared
 
-#### 5. Must Manage Cloudflare Config - ~~MEDIUM~~ → **IMPROVED** 🔶
-**What changed:**
-- Centralized config package (@mrsimpson/homelab-config)
-- HomelabContext for dependency injection
-- Apps can now inherit infrastructure context from base-infra stack
-
-**Example:**
-```typescript
-import { setupBaseInfra } from "@mrsimpson/homelab-base-infra";
-
-const { context } = setupBaseInfra();
-// context includes cloudflare, tls, ingress config
-```
-
-### ❌ Issues STILL VALID
-
-All other developer experience issues remain:
-- No local development story
-- No log access (Loki not deployed)
-- No shell access documentation
-- Slow deployment feedback
-- No database component
-- No service-to-service communication helpers
-- No rollback procedure
-- No preview environments
-- Cryptic error messages
-- No cost visibility
-- OAuth setup complexity
-- No migration guides for component changes
+**Recently Closed:**
+- [#17](https://github.com/mrsimpson/homelab/issues/17) - ✅ etcd not encrypted at rest (resolved by setup guide update)
 
 ---
 
-## 📊 Updated Priority Matrix
+## Recommended Next Steps
 
-### P0 (Deploy Immediately)
-| Issue | Perspective | Status | Effort |
-|-------|------------|--------|--------|
-| Network Policies | Security | ❌ Not started | 1-2 days |
-| Observability stack | Ops | ❌ Not started | 3-5 days |
-| Backup strategy | Ops | ❌ Not started | 2-3 days |
-
-### P1 (This Quarter)
-| Issue | Perspective | Status | Effort |
-|-------|------------|--------|--------|
-| Complete ESO migration | Security | 🔶 50% | 2-3 days |
-| Alerting | Ops | ❌ Not started | 1-2 days |
-| Health checks in component | Ops | ❌ Not started | 1 day |
-| RBAC ServiceAccounts | Security | ❌ Not started | 2-3 days |
-| Database component | Developer | ❌ Not started | 3-4 days |
-| Log access (Loki) | Developer | ❌ Not started | (dep: observability) |
-
-### P2 (Future)
-- All other security issues (image scanning, audit logs, etc.)
-- Operational maturity (HA, staging, DR runbook)
-- Developer experience (local dev, preview envs, etc.)
+1. **Close #17** - etcd encryption now resolved
+2. **Focus on P0 issues:**
+   - #16 Network policies (1-2 days)
+   - #13 Observability stack (3-5 days)
+   - #14 Backup strategy (2-3 days)
+   - #19 Local dev mode (2-3 days)
 
 ---
 
-## 🎯 Recommended Next Steps
+## Historical Context
 
-### Phase 1: Critical Security (Week 1)
-```bash
-# 1. Implement network policies
-mkdir -p packages/core/infrastructure/src/network-policies
-# Create default-deny + explicit allow rules
-
-# 2. Fix OAuth email validation bug
-# Edit packages/core/components/src/ExposedWebApp.ts:378
-
-# Note: etcd encryption already documented in setup guide ✅
-```
-
-### Phase 2: Observability Foundation (Week 2-3)
-```typescript
-// packages/core/infrastructure/src/observability/
-- prometheus.ts  // Metrics collection
-- loki.ts        // Log aggregation
-- grafana.ts     // Dashboards
-- alertmanager.ts // Notifications
-```
-
-### Phase 3: Operational Resilience (Week 4-5)
-```typescript
-// packages/core/infrastructure/src/backup/
-- velero.ts      // PV snapshots
-- schedules.ts   // Daily backup jobs
-
-// Update ExposedWebApp component
-- Add readinessProbe/livenessProbe
-- Add RBAC ServiceAccount
-```
-
-### Phase 4: Complete ESO Migration (Week 6)
-```bash
-# Migrate all Pulumi config secrets to Pulumi ESC
-pulumi config set --secret cloudflareApiToken ... --path
-# Move to ESC environment
-
-# Update infrastructure to pull from ESC
-# Remove secrets from Pulumi.yaml
-```
-
----
-
-## 📝 Summary of Changes Since Review
-
-### ✅ Completed (4 items)
-1. **Pod Security Standards** - Fully implemented
-2. **etcd Secrets Encryption** - Added to setup guide with --secrets-encryption
-3. **Monorepo Structure** - Clean separation achieved
-4. **External Secrets Operator** - Deployed and configured
-
-### 🔶 Partially Completed (2 items)
-1. **Secrets Management** - ESO exists but migration incomplete
-2. **Developer Config Management** - Improved with centralized config
-
-### ❌ Not Started (34 items)
-- 8 Security issues
-- 14 Ops issues
-- 12 Developer experience issues
-
-### 📈 Progress: 10% Complete (4/40 issues resolved, 2/40 partially resolved)
-
----
-
-## 🎓 Key Learnings
-
-### What Worked Well
-1. **PSS Implementation** - Automatic enforcement via component is excellent
-2. **Monorepo Pattern** - Clear separation makes codebase more maintainable
-3. **HomelabContext** - Dependency injection pattern reduces config duplication
-
-### What's Blocking Progress
-1. **Time constraints** - Security and ops work competes with features
-2. **Complexity** - Observability stack is a multi-day effort
-3. **Priorities** - Focus on getting apps running vs. hardening infrastructure
-
-### Recommended Focus
-**If you can only do ONE thing:** Implement observability stack (Prometheus + Loki + Grafana)
-**Why:** You cannot operate, debug, or improve what you cannot see. This unlocks everything else.
-
----
-
-## 🔄 Next Review Date
-
-**Recommended:** 2025-01-15 (3 weeks)
-**Goal:** Complete P0 items (network policies, etcd encryption, observability, backups)
+For the full original critical review with detailed analysis from security, ops, and developer perspectives, see:
+- **Original Review:** docs/CRITICAL-REVIEW.md
+- **Issue Mapping:** docs/ISSUE-STATUS-UPDATE.md
