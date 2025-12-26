@@ -1,0 +1,30 @@
+{
+  "name": "@mrsimpson/homelab-stack-gh-runners",
+  "version": "0.1.0",
+  "description": "GitHub Actions runners with Firecracker isolation",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.137.0",
+    "@pulumi/kubernetes": "^4.18.3",
+    "@mrsimpson/homelab-core-components": "workspace:*",
+    "@mrsimpson/homelab-core-config": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "keywords": [
+    "pulumi",
+    "kubernetes",
+    "github-actions",
+    "firecracker",
+    "kata-containers"
+  ],
+  "author": "",
+  "license": "MIT"
+}

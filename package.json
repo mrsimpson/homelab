@@ -16,7 +16,8 @@
     "type-check": "tsc --noEmit",
     "preview": "pulumi preview",
     "up": "pulumi up",
-    "destroy": "pulumi destroy"
+    "destroy": "pulumi destroy",
+    "bootstrap:firecracker-nodes": "sudo bash bootstrap/setup-firecracker-nodes.sh"
   },
   "keywords": [
     "pulumi",
