@@ -49,6 +49,14 @@ export function setupBaseInfra() {
 		},
 	});
 
+	// Create GHCR pull secret for private container images
+	// This creates an ImagePullSecret in the default namespace that can be used
+	// by applications to pull images from GitHub Container Registry (ghcr.io)
+	const ghcrPullSecret = coreInfra.createGhcrPullSecret({
+		externalSecretsOperator: coreInfra.externalSecretsOperator,
+		namespaces: ["default"],
+	});
+
 	// Export infrastructure details
 	return {
 		context: homelabContext,
@@ -66,6 +74,9 @@ export function setupBaseInfra() {
 		},
 		externalSecrets: {
 			externalSecretsOperator: coreInfra.externalSecretsOperator,
+		},
+		registrySecrets: {
+			ghcrPullSecret: ghcrPullSecret,
 		},
 	};
 }

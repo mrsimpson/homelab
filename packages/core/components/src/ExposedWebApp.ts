@@ -35,6 +35,14 @@ import * as pulumi from "@pulumi/pulumi";
  *     }
  *   });
  *
+ * Example (with private container registry):
+ *   new ExposedWebApp("blog", {
+ *     image: "ghcr.io/username/my-app:latest",
+ *     domain: "blog.example.com",
+ *     port: 2368,
+ *     imagePullSecrets: [{ name: "ghcr-pull-secret" }]
+ *   });
+ *
  * Example (standalone):
  *   new ExposedWebApp("blog", {
  *     image: "ghost:5",
@@ -107,6 +115,8 @@ export interface ExposedWebAppArgs {
 	};
 	/** Tags for organizing resources */
 	tags?: string[];
+	/** ImagePullSecrets for private container registries (e.g., GHCR, ECR) */
+	imagePullSecrets?: Array<{ name: string }>;
 
 	// Infrastructure dependencies (all optional)
 	/** Cloudflare DNS configuration */
@@ -421,6 +431,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 							},
 						},
 						spec: {
+							imagePullSecrets: args.imagePullSecrets,
 							securityContext: {
 								runAsNonRoot: true,
 								runAsUser: 1000,
