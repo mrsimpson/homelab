@@ -55,6 +55,59 @@ echo "Current stack: $CURRENT_STACK"
 # Export Pulumi config as JSON
 echo "Exporting Pulumi configuration..."
 PULUMI_JSON=$(cd "$PROJECT_DIR" && pulumi config --json)
+PULUMI_SECRETS_JSON=$(cd "$PROJECT_DIR" && pulumi config --json --show-secrets)
+
+# Export ESC environments
+echo "Exporting Pulumi ESC environments..."
+ESC_ENVS_JSON="{}"
+if command -v pulumi >/dev/null 2>&1; then
+    # Get list of ESC environments accessible to this project/user
+    ESC_ENV_LIST=$(cd "$PROJECT_DIR" && pulumi env ls 2>/dev/null || echo "")
+    if [ -n "$ESC_ENV_LIST" ]; then
+        echo "Found ESC environments: $ESC_ENV_LIST"
+        # Export each environment
+        export ESC_ENV_LIST
+        ESC_ENVS_JSON=$(cd "$PROJECT_DIR" && python3 << 'ENV_PYTHON'
+import subprocess
+import json
+import os
+
+envs = {}
+env_list = os.environ.get('ESC_ENV_LIST', '').strip()
+if env_list:
+    for env in env_list.split('\n'):
+        env = env.strip()
+        if env:
+            try:
+                # Get the full environment name (including org if needed)
+                if '/' not in env:
+                    # Environment name like 'dev' needs org prepended
+                    full_env = f"mrsimpson/{env}"
+                elif env.count('/') == 1:
+                    # Environment name like 'homelab/dev' needs org prepended
+                    full_env = f"mrsimpson/{env}"
+                else:
+                    # Already full name like 'mrsimpson/homelab/dev'
+                    full_env = env
+                
+                result = subprocess.run(['pulumi', 'env', 'open', full_env], capture_output=True, text=True)
+                if result.returncode == 0:
+                    envs[full_env] = json.loads(result.stdout)
+                    print(f"✓ Exported ESC environment: {full_env}", file=os.sys.stderr)
+                else:
+                    print(f"⚠ Failed to export ESC environment {full_env}: {result.stderr}", file=os.sys.stderr)
+            except Exception as e:
+                print(f"⚠ Error exporting ESC environment {env}: {str(e)}", file=os.sys.stderr)
+
+print(json.dumps(envs))
+ENV_PYTHON
+)
+    else
+        echo "No ESC environments found"
+    fi
+else
+    echo "Pulumi CLI not available, skipping ESC environments"
+fi
 
 # Create unencrypted YAML from JSON
 echo "Converting to YAML format..."
@@ -65,41 +118,68 @@ else
   SECRETS_JSON="{$SECRETS_JSON}"
 fi
 
-PULUMI_JSON="$PULUMI_JSON" SECRETS_JSON="$SECRETS_JSON" python3 > "$TEMP_CONFIG" << 'PYTHON'
+PULUMI_JSON="$PULUMI_JSON" PULUMI_SECRETS_JSON="$PULUMI_SECRETS_JSON" SECRETS_JSON="$SECRETS_JSON" ESC_ENVS_JSON="$ESC_ENVS_JSON" python3 > "$TEMP_CONFIG" << 'PYTHON'
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 pulumi_json = os.environ.get('PULUMI_JSON', '{}')
+pulumi_secrets_json = os.environ.get('PULUMI_SECRETS_JSON', '{}')
 secrets_json = os.environ.get('SECRETS_JSON', '{}')
+esc_envs_json = os.environ.get('ESC_ENVS_JSON', '{}')
 
 try:
     cli_secrets = json.loads(secrets_json)
 except json.JSONDecodeError:
     cli_secrets = {}
 
+try:
+    esc_envs = json.loads(esc_envs_json)
+except json.JSONDecodeError:
+    esc_envs = {}
+
+try:
+    pulumi_secrets_data = json.loads(pulumi_secrets_json)
+except json.JSONDecodeError:
+    pulumi_secrets_data = {}
+
 print("# Pulumi Configuration Backup")
-print(f"# Exported at: {datetime.utcnow().isoformat()}Z")
+print(f"# Exported at: {datetime.now(timezone.utc).isoformat()}")
 print("#")
 print("# This file is encrypted with SOPS/AGE")
 print("# To view/edit: sops pulumi-config.enc.yaml")
 print("# To restore: ./restore-config.sh [stack-name]")
 print("")
-print("config:")
 
+# Export stack configuration
+print("config:")
 data = json.loads(pulumi_json)
 for key, val in sorted(data.items()):
     if val.get('secret'):
         print(f"  {key}:")
         print(f"    secret: true")
-        # Use CLI secret if provided, otherwise leave empty for manual entry
+        # Use CLI secret if provided, otherwise use actual secret value from --show-secrets
         if key in cli_secrets:
             print(f'    value: {json.dumps(cli_secrets[key])}')
+        elif key in pulumi_secrets_data and pulumi_secrets_data[key].get('value'):
+            print(f'    value: {json.dumps(pulumi_secrets_data[key]["value"])}')
         else:
             print(f'    value: ""  # TODO: Fill in secret value')
     else:
         print(f"  {key}:")
         print(f'    value: {json.dumps(val.get("value", ""))}')
+
+# Export ESC environments
+if esc_envs:
+    print("")
+    print("esc_environments:")
+    for env_name, env_data in sorted(esc_envs.items()):
+        print(f"  {env_name.replace('/', '_').replace('-', '_')}:")
+        print(f"    name: {json.dumps(env_name)}")
+        print("    values:")
+        for key, value in sorted(env_data.items()):
+            # All ESC values are treated as secrets for safety
+            print(f"      {key}: {json.dumps(value)}")
 PYTHON
 
 # Encrypt with SOPS

@@ -1,0 +1,36 @@
+{
+  "name": "@mrsimpson/homelab-app-nodejs-demo",
+  "version": "0.1.0",
+  "description": "Node.js demo app for homelab deployment with private GHCR image",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": ["pulumi", "kubernetes", "homelab", "app", "nodejs", "ghcr", "private-image"],
+  "author": "mrsimpson",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrsimpson/homelab.git",
+    "directory": "packages/apps/nodejs-demo"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@mrsimpson/homelab-core-components": "*",
+    "@mrsimpson/homelab-config": "*"
+  },
+  "peerDependencies": {
+    "@pulumi/pulumi": "^3.137.0"
+  }
+}

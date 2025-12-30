@@ -14,7 +14,29 @@ Bootstrap a k3s cluster and deploy core infrastructure with Pulumi.
 
 ## Step 1: Install k3s
 
-SSH into your Linux machine and install k3s:
+SSH into your Linux machine and install k3s.
+
+### 1a: Install Prerequisites for Storage
+
+If you plan to use persistent storage with Longhorn (recommended), install iSCSI tools first:
+
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt install -y open-iscsi
+sudo systemctl enable --now iscsid
+
+# RHEL/CentOS/Fedora
+sudo yum install -y iscsi-initiator-utils  # or dnf
+sudo systemctl enable --now iscsid
+
+# Verify installation
+which iscsiadm
+sudo systemctl status iscsid
+```
+
+### 1b: Install k3s
+
+Now install k3s:
 
 ```bash
 curl -sfL https://get.k3s.io | sh -s - \

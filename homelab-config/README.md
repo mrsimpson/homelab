@@ -1,6 +1,6 @@
 # Pulumi Config Backup with SOPS/AGE
 
-Encrypt and backup your entire Pulumi configuration (secrets + public values) using SOPS and AGE asymmetric encryption.
+Encrypt and backup your entire Pulumi configuration (stack config + ESC environments + secrets) using SOPS and AGE asymmetric encryption.
 
 ## Files
 
@@ -57,7 +57,12 @@ cp .sops.age ~/.sops-backup/pulumi-homelab.age
 ./export-config.sh . cloudflare:apiToken=abc123 homelab:pulumiAccessToken=xyz789
 ```
 
-Exports all configuration and encrypts with AES256-GCM.
+Exports all stack configuration and Pulumi ESC environments, then encrypts with AES256-GCM.
+
+**What gets exported:**
+- Pulumi stack configuration (public + secrets)
+- Pulumi ESC environments accessible to your account
+- CLI-provided secrets (passed as arguments)
 
 ## Restore to a Stack
 
@@ -92,7 +97,8 @@ The restore script will:
 1. Decrypt the config using the AGE key
 2. Parse the YAML
 3. Set all values in the target Pulumi stack
-4. Show which secrets need manual setup (empty values)
+4. Restore ESC environments (requires edit permissions)
+5. Show which secrets need manual setup (empty values)
 
 ## Edit Encrypted Config
 
@@ -165,6 +171,8 @@ mv pulumi-homelab.age.new pulumi-homelab.age
 | `Decryption failed` | Verify AGE key matches the config's public key |
 | `no matching creation rules` | Run from `~/homelab-config` or ensure `.sops.yaml` exists |
 | `Permission denied` on scripts | `chmod +x *.sh` |
+| ESC environment restore fails | Verify you have `pulumi env edit` permissions for the environment |
+| ESC environments not exported | Ensure you're logged into Pulumi Cloud: `pulumi login` |
 
 ## References
 

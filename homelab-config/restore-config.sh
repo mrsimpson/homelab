@@ -80,6 +80,7 @@ echo "Decrypting configuration..."
 
 # Parse YAML and restore to Pulumi
 echo "Restoring configuration to Pulumi..."
+echo "Note: ESC environments require 'pulumi env edit' permissions"
 OVERRIDE_SECRETS_JSON=$(for key in "${!OVERRIDE_SECRETS[@]}"; do echo "\"$key\": \"${OVERRIDE_SECRETS[$key]}\""; done | paste -sd, -)
 if [ -z "$OVERRIDE_SECRETS_JSON" ]; then
   OVERRIDE_SECRETS_JSON="{}"
@@ -132,11 +133,57 @@ for key, val in config_data['config'].items():
         print(f"✗ {key}: {e.stderr.decode()}")
         failed_keys.append(key)
 
-if failed_keys:
-    print(f"\nWarning: {len(failed_keys)} configuration(s) failed to restore")
+# Restore ESC environments
+esc_failed_envs = []
+if 'esc_environments' in config_data:
+    print("\n--- Restoring ESC Environments ---")
+    for env_key, env_config in config_data['esc_environments'].items():
+        env_name = env_config.get('name', env_key)
+        env_values = env_config.get('values', {})
+        
+        if not env_values:
+            print(f"⚠️  Skipping ESC environment (empty): {env_name}")
+            continue
+        
+        try:
+            # Create a temporary YAML file for the environment definition
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_env_file:
+                yaml.dump({'values': env_values}, temp_env_file, default_flow_style=False)
+                temp_env_path = temp_env_file.name
+            
+            # Import the environment using pulumi env edit
+            cmd = ['pulumi', 'env', 'edit', env_name, '--file', temp_env_path]
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            
+            # Clean up temp file
+            os.unlink(temp_env_path)
+            
+            print(f"✓ ESC environment: {env_name}")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"✗ ESC environment {env_name}: {e.stderr.decode().strip()}")
+            esc_failed_envs.append(env_name)
+            # Clean up temp file on error
+            try:
+                os.unlink(temp_env_path)
+            except:
+                pass
+        except Exception as e:
+            print(f"✗ ESC environment {env_name}: {str(e)}")
+            esc_failed_envs.append(env_name)
+
+total_failures = len(failed_keys) + len(esc_failed_envs)
+if total_failures > 0:
+    print(f"\nWarning: {len(failed_keys)} configuration(s) and {len(esc_failed_envs)} ESC environment(s) failed to restore")
+    if esc_failed_envs:
+        print("ESC environment failures may be due to missing permissions.")
+        print("You may need to manually restore ESC environments using:")
+        for env_name in esc_failed_envs:
+            print(f"  pulumi env edit {env_name}")
     sys.exit(1)
 else:
-    print(f"\n✓ All configurations restored successfully")
+    print(f"\n✓ All configurations and ESC environments restored successfully")
 
 PYTHON
 
