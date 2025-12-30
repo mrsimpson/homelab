@@ -69,15 +69,7 @@ export function createGhcrPullSecret(args: RegistrySecretsArgs) {
 							template: {
 								type: "kubernetes.io/dockerconfigjson",
 								data: {
-									".dockerconfigjson": pulumi.interpolate`{
-  "auths": {
-    "ghcr.io": {
-      "username": "{{ .github_username }}",
-      "password": "{{ .github_token }}",
-      "auth": "{{ printf "%s:%s" .github_username .github_token | b64enc }}"
-    }
-  }
-}`,
+									".dockerconfigjson": pulumi.interpolate`{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
 								},
 							},
 						},
@@ -85,13 +77,13 @@ export function createGhcrPullSecret(args: RegistrySecretsArgs) {
 							{
 								secretKey: "github_username",
 								remoteRef: {
-									key: "github-credentials/username",
+									key: "github-username",
 								},
 							},
 							{
 								secretKey: "github_token",
 								remoteRef: {
-									key: "github-credentials/token",
+									key: "github-token",
 								},
 							},
 						],

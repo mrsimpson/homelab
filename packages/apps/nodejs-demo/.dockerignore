@@ -1,0 +1,28 @@
+# Node.js
+node_modules
+npm-debug.log
+*.log
+
+# Development
+.git
+.gitignore
+.env
+.env.*
+
+# Deployment code
+deployment/
+
+# Documentation
+README.md
+*.md
+
+# Build scripts
+build.sh
+deploy.sh
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swn
+*.swo

@@ -1,0 +1,20 @@
+{
+  "name": "nodejs-demo-deployment",
+  "version": "1.0.0",
+  "description": "Pulumi deployment for nodejs-demo app",
+  "main": "index.ts",
+  "scripts": {
+    "deploy": "pulumi up",
+    "destroy": "pulumi destroy",
+    "preview": "pulumi preview"
+  },
+  "dependencies": {
+    "@mrsimpson/homelab-core-components": "workspace:*",
+    "@mrsimpson/homelab-config": "workspace:*",
+    "@pulumi/pulumi": "^3.137.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7"
+  }
+}

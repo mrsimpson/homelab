@@ -6,6 +6,10 @@
 
 export { ExposedWebApp } from "./ExposedWebApp";
 export { HomelabContext } from "./homelab-context";
+export {
+	createGhcrImagePullSecret,
+	createDockerHubImagePullSecret,
+} from "./registry-secrets";
 export type {
 	ExposedWebAppArgs,
 	OAuthConfig,
@@ -16,3 +20,4 @@ export type {
 	ExternalSecretsConfig,
 } from "./ExposedWebApp";
 export type { HomelabContextConfig } from "./homelab-context";
+export type { CreateImagePullSecretArgs } from "./registry-secrets";

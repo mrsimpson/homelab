@@ -49,12 +49,33 @@ export function setupBaseInfra() {
 		},
 	});
 
+	// Auto-discover monorepo apps and create GHCR pull secrets
+	// This reads the packages/apps directory to find all monorepo apps
+	const fs = require("fs");
+	const path = require("path");
+	const appsDir = path.join(__dirname, "../../../apps");
+
+	let monorepoAppNamespaces = ["default"]; // Always include default
+
+	try {
+		if (fs.existsSync(appsDir)) {
+			const appDirs = fs.readdirSync(appsDir, { withFileTypes: true })
+				.filter((dirent: any) => dirent.isDirectory())
+				.map((dirent: any) => dirent.name);
+
+			monorepoAppNamespaces = [...monorepoAppNamespaces, ...appDirs];
+			pulumi.log.info(`Auto-discovered monorepo apps: ${appDirs.join(", ")}`);
+		}
+	} catch (error) {
+		pulumi.log.warn(`Could not read apps directory: ${error}`);
+	}
+
 	// Create GHCR pull secret for private container images
-	// This creates an ImagePullSecret in the default namespace that can be used
-	// by applications to pull images from GitHub Container Registry (ghcr.io)
+	// This creates ImagePullSecrets in all discovered monorepo app namespaces
+	// External apps can create their own using createGhcrImagePullSecret() helper
 	const ghcrPullSecret = coreInfra.createGhcrPullSecret({
 		externalSecretsOperator: coreInfra.externalSecretsOperator,
-		namespaces: ["default"],
+		namespaces: monorepoAppNamespaces,
 	});
 
 	// Export infrastructure details
