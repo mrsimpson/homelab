@@ -1,0 +1,14 @@
+# SOPS encryption keys - NEVER commit these!
+.sops.age
+*.age
+*.key
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# Pulumi artifacts
+Pulumi.*.yaml
+.pulumi/

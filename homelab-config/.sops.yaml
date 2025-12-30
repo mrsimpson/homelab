@@ -1,0 +1,3 @@
+creation_rules:
+  - path_regex: pulumi-config\.enc\.yaml$
+    age: age1fleshqd626lkpwd6p5y3wwwuz99ky0e5s6jwr07ssvezxn4924uq02qerp
