@@ -8,13 +8,12 @@ import * as pulumi from "@pulumi/pulumi";
  * This component is infrastructure-agnostic and can be used with or without:
  * - Cert-manager for automatic TLS certificates
  * - Cloudflare for DNS and tunnel routing
- * - External Secrets Operator for OAuth secret management
+ * - Authelia for centralized authentication
  *
  * Automatically configures:
  * - Kubernetes Deployment
- * - Optional OAuth2 Proxy sidecar for authentication
  * - Kubernetes Service (ClusterIP)
- * - Ingress with optional TLS
+ * - Ingress with optional TLS and forward authentication
  * - Optional Cloudflare DNS record
  * - Optional persistent storage
  *
@@ -50,14 +49,6 @@ import * as pulumi from "@pulumi/pulumi";
  *     port: 2368
  *   });
  */
-
-export interface OAuthConfig {
-  provider: "google" | "github" | "oidc";
-  clientId: string;
-  clientSecret: pulumi.Output<string>;
-  allowedEmails?: string[];
-  oidcIssuerUrl?: string;
-}
 
 export interface StorageConfig {
   size: string;
@@ -113,8 +104,6 @@ export interface ExposedWebAppArgs {
   replicas?: number;
   /** Environment variables */
   env?: Array<{ name: string; value: string | pulumi.Output<string> }>;
-  /** @deprecated Use requireAuth with ForwardAuthConfig instead. OAuth2 Proxy sidecar pattern is deprecated. */
-  oauth?: OAuthConfig;
   /** Enable forward authentication (requires ForwardAuthConfig in dependencies) */
   requireAuth?: boolean;
   /** Persistent storage configuration */
@@ -202,93 +191,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       );
     }
 
-    // Optional: Create OAuth2 Proxy configuration
-    let oauthSecretName: pulumi.Output<string> | undefined;
-    if (args.oauth) {
-      const oauthDeps: pulumi.Resource[] = [namespace];
-      if (args.externalSecrets?.operator) {
-        oauthDeps.push(args.externalSecrets.operator);
-      }
-
-      // Use External Secrets if operator is provided, otherwise create a regular secret
-      if (args.externalSecrets?.operator) {
-        const oauthExternalSecret = new k8s.apiextensions.CustomResource(
-          `${name}-oauth`,
-          {
-            apiVersion: "external-secrets.io/v1beta1",
-            kind: "ExternalSecret",
-            metadata: {
-              name: `${name}-oauth`,
-              namespace: namespace.metadata.name,
-            },
-            spec: {
-              refreshInterval: "1h",
-              secretStoreRef: {
-                name: args.externalSecrets.storeName || "pulumi-esc",
-                kind: "ClusterSecretStore",
-              },
-              target: {
-                name: `${name}-oauth`,
-                creationPolicy: "Owner",
-              },
-              data: [
-                {
-                  secretKey: "clientId",
-                  remoteRef: {
-                    key: `${name}/oauth/clientId`,
-                  },
-                },
-                {
-                  secretKey: "clientSecret",
-                  remoteRef: {
-                    key: `${name}/oauth/clientSecret`,
-                  },
-                },
-                {
-                  secretKey: "cookieSecret",
-                  remoteRef: {
-                    key: `${name}/oauth/cookieSecret`,
-                  },
-                },
-              ],
-            },
-          },
-          { ...childOpts, dependsOn: oauthDeps }
-        );
-
-        oauthSecretName = oauthExternalSecret.metadata.name;
-      } else {
-        // Create a regular Kubernetes secret
-        const oauthSecret = new k8s.core.v1.Secret(
-          `${name}-oauth`,
-          {
-            metadata: {
-              name: `${name}-oauth`,
-              namespace: namespace.metadata.name,
-            },
-            stringData: {
-              clientId: args.oauth.clientId,
-              clientSecret: args.oauth.clientSecret,
-              // Generate a random cookie secret
-              cookieSecret: pulumi
-                .all([args.oauth.clientSecret])
-                .apply(() =>
-                  Buffer.from(
-                    Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))
-                  ).toString("base64")
-                ),
-            },
-          },
-          { ...childOpts, dependsOn: oauthDeps }
-        );
-
-        oauthSecretName = oauthSecret.metadata.name;
-      }
-    }
-
-    // Build container list
-    const containers: any[] = [];
-
     // Main application container
     const appContainer: any = {
       name: "app",
@@ -325,83 +227,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
         },
       ];
     }
-
-    // If OAuth configured, add oauth2-proxy sidecar
-    if (args.oauth && oauthSecretName) {
-      const oauthProxyContainer: any = {
-        name: "oauth-proxy",
-        image: "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0",
-        ports: [
-          {
-            containerPort: 4180,
-            name: "oauth-http",
-          },
-        ],
-        args: [
-          "--http-address=0.0.0.0:4180",
-          `--upstream=http://localhost:${args.port}`,
-          "--email-domain=*",
-          "--cookie-secure=true",
-          "--cookie-httponly=true",
-          "--set-xauthrequest=true",
-        ],
-        env: [
-          {
-            name: "OAUTH2_PROXY_CLIENT_ID",
-            valueFrom: {
-              secretKeyRef: {
-                name: oauthSecretName,
-                key: "clientId",
-              },
-            },
-          },
-          {
-            name: "OAUTH2_PROXY_CLIENT_SECRET",
-            valueFrom: {
-              secretKeyRef: {
-                name: oauthSecretName,
-                key: "clientSecret",
-              },
-            },
-          },
-          {
-            name: "OAUTH2_PROXY_COOKIE_SECRET",
-            valueFrom: {
-              secretKeyRef: {
-                name: oauthSecretName,
-                key: "cookieSecret",
-              },
-            },
-          },
-        ],
-        resources: {
-          requests: { cpu: "10m", memory: "32Mi" },
-          limits: { cpu: "100m", memory: "128Mi" },
-        },
-      };
-
-      // Provider-specific configuration
-      if (args.oauth.provider === "google") {
-        oauthProxyContainer.args.push("--provider=google");
-      } else if (args.oauth.provider === "github") {
-        oauthProxyContainer.args.push("--provider=github");
-      } else if (args.oauth.provider === "oidc" && args.oauth.oidcIssuerUrl) {
-        oauthProxyContainer.args.push("--provider=oidc");
-        oauthProxyContainer.args.push(`--oidc-issuer-url=${args.oauth.oidcIssuerUrl}`);
-      }
-
-      // Email allowlist
-      if (args.oauth.allowedEmails) {
-        oauthProxyContainer.args.push(`--authenticated-emails-file=/dev/null`);
-        args.oauth.allowedEmails.forEach((email) => {
-          oauthProxyContainer.args.push(`--email-domain=${email.split("@")[1]}`);
-        });
-      }
-
-      containers.push(oauthProxyContainer);
-    }
-
-    containers.push(appContainer);
 
     // Build volumes list
     const volumes: any[] = [];
@@ -447,7 +272,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                 runAsGroup: args.securityContext?.runAsGroup || 1000,
                 fsGroup: args.securityContext?.fsGroup || 1000,
               },
-              containers: containers,
+              containers: [appContainer],
               volumes: volumes.length > 0 ? volumes : undefined,
             },
           },
@@ -455,9 +280,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       },
       { ...childOpts, dependsOn: [namespace] }
     );
-
-    // Determine service target port (OAuth proxy if enabled, else app port)
-    const servicePort = args.oauth ? 4180 : args.port;
 
     // Create Service
     this.service = new k8s.core.v1.Service(
@@ -475,7 +297,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           ports: [
             {
               port: 80,
-              targetPort: servicePort,
+              targetPort: args.port,
               protocol: "TCP",
               name: "http",
             },

@@ -39,7 +39,7 @@ export interface AutheliaConfig {
 	storage?: {
 		/** Storage class for PostgreSQL PVC */
 		storageClass?: string;
-		/** Size of PostgreSQL PVC */
+		/** Size of PostgreSQL PVC (defaults to 1Gi, suitable for <20 users) */
 		size?: string;
 	};
 
@@ -92,7 +92,7 @@ export function createAuthelia(args: AutheliaConfig) {
 		{ dependsOn: [namespace] }
 	);
 
-	// PostgreSQL PVC
+	// PostgreSQL PVC (1Gi is sufficient for <20 users)
 	const postgresPvc = new k8s.core.v1.PersistentVolumeClaim(
 		"authelia-postgres-pvc",
 		{
@@ -105,7 +105,7 @@ export function createAuthelia(args: AutheliaConfig) {
 				storageClassName: args.storage?.storageClass || "longhorn-persistent",
 				resources: {
 					requests: {
-						storage: args.storage?.size || "5Gi",
+						storage: args.storage?.size || "1Gi",
 					},
 				},
 			},

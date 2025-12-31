@@ -145,35 +145,6 @@ const app = homelab.createExposedWebApp("public-app", {
 });
 ```
 
-## Migration from oauth2-proxy
-
-**Old approach** (oauth2-proxy sidecar):
-```typescript
-const app = homelab.createExposedWebApp("my-app", {
-  image: "my-image:latest",
-  domain: "my-app.example.com",
-  port: 8080,
-  oauth: {
-    provider: "github",
-    clientId: "xxx",
-    clientSecret: secret,
-    allowedEmails: ["user@example.com"],
-  },
-});
-```
-
-**New approach** (forward-auth):
-```typescript
-const app = homelab.createExposedWebApp("my-app", {
-  image: "my-image:latest",
-  domain: "my-app.example.com",
-  port: 8080,
-  requireAuth: true,
-});
-```
-
-Then configure access in Authelia ConfigMap (once for all apps).
-
 ## Advantages
 
 ✅ **No sidecar overhead** - Saves 50-100MB RAM per app

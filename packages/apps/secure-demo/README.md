@@ -4,7 +4,7 @@ Example application demonstrating Authelia forward authentication integration.
 
 ## Overview
 
-This app shows how to protect a web application using Authelia's forward authentication pattern. Unlike the legacy oauth2-proxy sidecar approach, this requires:
+This app shows how to protect a web application using Authelia's forward authentication pattern:
 
 - **No sidecar containers** - Authentication handled at ingress level
 - **Single configuration** - Just set `requireAuth: true`
@@ -62,15 +62,6 @@ To change access policies, update Authelia's ACL configuration in the Authelia C
    ```bash
    kubectl logs -n secure-demo -l app=secure-demo
    ```
-
-## Advantages Over oauth2-proxy
-
-- ✅ No sidecar overhead (50-100MB saved per app)
-- ✅ Single sign-on across all apps
-- ✅ Configure once, apply everywhere
-- ✅ Centralized access policies
-- ✅ MFA support
-- ✅ Better audit trail
 
 ## See Also
 

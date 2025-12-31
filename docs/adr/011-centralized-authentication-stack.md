@@ -11,26 +11,15 @@ The homelab requires authentication for multiple application types:
 - On-premise Supabase (PostgreSQL-based platform requiring OIDC provider)
 - Open-source containerized applications (Longhorn UI, monitoring tools, etc.)
 
-**Current State:**
-- oauth2-proxy deployed as sidecar per application (`ExposedWebApp` component)
-- Each app requires separate OAuth configuration (GitHub/Google client credentials)
-- No centralized identity management or access policies
-- No OIDC provider capability for Supabase integration
-
 **Requirements:**
 - Configure authentication once for entire homelab (not per-application)
 - Secure access to custom apps + Supabase + OSS containerized apps
 - Federate identity from external IdPs (GitHub, Google)
 - Zero-trust architecture with per-app access policies
 - Self-hosted solution (avoid managed auth services)
-
-**Current Limitations:**
-1. **oauth2-proxy cannot act as OIDC provider** - Only consumes OIDC, cannot provide it to Supabase
-2. **Per-app configuration overhead** - Repeated OAuth setup for each application
-3. **No granular access control** - Binary authenticated/unauthenticated, no per-app policies
-4. **Resource waste** - N×oauth2-proxy sidecar processes (50-100MB each)
-5. **Fragmented sessions** - Users re-authenticate for each app (no SSO)
-6. **No centralized user management** - Access revocation requires updating all app configs
+- OIDC provider capability for Supabase integration
+- Single sign-on across all applications
+- Minimal resource overhead
 
 ## Decision
 
@@ -123,12 +112,6 @@ nginx.ingress.kubernetes.io/auth-response-headers: "Remote-User,Remote-Email,Rem
 - ❌ No forward-auth support (requires per-app integration)
 - ❌ No MFA built-in
 - ❌ Limited policy engine
-
-**Continue with oauth2-proxy sidecars**
-- ❌ Doesn't meet "configure once" requirement
-- ❌ Cannot integrate Supabase
-- ❌ No zero-trust capabilities
-- ❌ Escalating resource waste as apps grow
 
 ## Implementation Strategy
 

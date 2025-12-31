@@ -81,7 +81,7 @@ const authelia = createAuthelia({
   },
   storage: {
     storageClass: "longhorn-persistent",
-    size: "5Gi",
+    size: "1Gi",  // Sufficient for <20 users
   },
 });
 
