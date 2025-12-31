@@ -105,7 +105,9 @@ Features:
 - ✅ Per-app access policies
 - ✅ No per-app configuration needed
 
-See [How to: Use Forward Auth](./docs/howto/use-forward-auth.md) for details.
+**Learn more**:
+- [How to: Use Forward Auth](./docs/howto/use-forward-auth.md) - Enable auth for apps
+- [How to: Manage Access Control](./docs/howto/manage-access-control.md) - Configure who can access what
 
 ## Adding Infrastructure
 
