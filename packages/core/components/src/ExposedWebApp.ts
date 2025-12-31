@@ -93,6 +93,15 @@ export interface ExternalSecretsConfig {
   storeName?: string;
 }
 
+export interface ForwardAuthConfig {
+  /** Authelia verify URL for forward authentication */
+  verifyUrl: string | pulumi.Output<string>;
+  /** Authelia signin URL for redirects */
+  signinUrl: string | pulumi.Output<string>;
+  /** Response headers to forward from Authelia (defaults to Remote-User,Remote-Email,Remote-Groups) */
+  responseHeaders?: string;
+}
+
 export interface ExposedWebAppArgs {
   /** Container image to deploy */
   image: string;
@@ -104,8 +113,10 @@ export interface ExposedWebAppArgs {
   replicas?: number;
   /** Environment variables */
   env?: Array<{ name: string; value: string | pulumi.Output<string> }>;
-  /** OAuth2 Proxy configuration */
+  /** @deprecated Use requireAuth with ForwardAuthConfig instead. OAuth2 Proxy sidecar pattern is deprecated. */
   oauth?: OAuthConfig;
+  /** Enable forward authentication (requires ForwardAuthConfig in dependencies) */
+  requireAuth?: boolean;
   /** Persistent storage configuration */
   storage?: StorageConfig;
   /** Resource requests and limits */
@@ -133,6 +144,8 @@ export interface ExposedWebAppArgs {
   ingress?: IngressConfig;
   /** External Secrets Operator configuration */
   externalSecrets?: ExternalSecretsConfig;
+  /** Forward authentication configuration (Authelia) */
+  forwardAuth?: ForwardAuthConfig;
 }
 
 export class ExposedWebApp extends pulumi.ComponentResource {
@@ -499,6 +512,14 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     } else if (hasTLS) {
       // Enable SSL redirect when TLS is configured but NOT using Cloudflare
       ingressAnnotations["nginx.ingress.kubernetes.io/ssl-redirect"] = "true";
+    }
+
+    // Forward authentication (Authelia)
+    if (args.requireAuth && args.forwardAuth) {
+      const responseHeaders = args.forwardAuth.responseHeaders || "Remote-User,Remote-Email,Remote-Groups";
+      ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] = args.forwardAuth.verifyUrl;
+      ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] = args.forwardAuth.signinUrl;
+      ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] = responseHeaders;
     }
 
     // Create Ingress

@@ -35,6 +35,7 @@ Internet → Cloudflare Edge → Encrypted Tunnel → k3s Cluster → Your Apps
 - **cert-manager**: Automatic TLS certificates (Let's Encrypt)
 - **ingress-nginx**: HTTP(S) routing and load balancing
 - **External Secrets**: Sync secrets from Pulumi ESC/Vault/AWS
+- **Authelia**: Centralized authentication with SSO and MFA support
 
 ## Project Structure
 
@@ -83,6 +84,28 @@ import { createMyApp } from "@mrsimpson/homelab-app-my-app";
 const myApp = createMyApp(homelab);
 export const myAppUrl = myApp.url;
 ```
+
+### With Authentication
+
+Protect apps with forward authentication:
+
+```typescript
+const app = homelab.createExposedWebApp("secure-app", {
+  image: "my-image:latest",
+  domain: "secure-app.example.com",
+  port: 8080,
+  requireAuth: true,  // Enable Authelia forward authentication
+});
+```
+
+Features:
+- ✅ Single sign-on across all apps
+- ✅ GitHub/Google social login
+- ✅ Multi-factor authentication
+- ✅ Per-app access policies
+- ✅ No per-app configuration needed
+
+See [How to: Use Forward Auth](./docs/howto/use-forward-auth.md) for details.
 
 ## Adding Infrastructure
 

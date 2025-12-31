@@ -3,6 +3,7 @@ import type {
 	CloudflareConfig,
 	ExposedWebAppArgs,
 	ExternalSecretsConfig,
+	ForwardAuthConfig,
 	IngressConfig,
 	TLSConfig,
 } from "./ExposedWebApp";
@@ -19,6 +20,7 @@ export interface HomelabContextConfig {
 	tls?: TLSConfig;
 	ingress?: IngressConfig;
 	externalSecrets?: ExternalSecretsConfig;
+	forwardAuth?: ForwardAuthConfig;
 }
 
 export class HomelabContext {
@@ -31,7 +33,7 @@ export class HomelabContext {
 		name: string,
 		args: Omit<
 			ExposedWebAppArgs,
-			"cloudflare" | "tls" | "ingress" | "externalSecrets"
+			"cloudflare" | "tls" | "ingress" | "externalSecrets" | "forwardAuth"
 		>,
 		opts?: pulumi.ComponentResourceOptions,
 	): ExposedWebApp {
@@ -43,6 +45,7 @@ export class HomelabContext {
 				tls: this.config.tls,
 				ingress: this.config.ingress,
 				externalSecrets: this.config.externalSecrets,
+				forwardAuth: this.config.forwardAuth,
 			},
 			opts,
 		);
