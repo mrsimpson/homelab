@@ -12,12 +12,12 @@ export {
 } from "./registry-secrets";
 export type {
 	ExposedWebAppArgs,
-	OAuthConfig,
 	StorageConfig,
 	CloudflareConfig,
 	TLSConfig,
 	IngressConfig,
 	ExternalSecretsConfig,
+	ForwardAuthConfig,
 } from "./ExposedWebApp";
 export type { HomelabContextConfig } from "./homelab-context";
 export type { CreateImagePullSecretArgs } from "./registry-secrets";
