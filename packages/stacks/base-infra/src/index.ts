@@ -114,6 +114,7 @@ export function setupBaseInfra() {
 
   // Auto-discover monorepo apps and create GHCR pull secrets
   // This reads the packages/apps directory to find all monorepo apps
+  // that use private GHCR images
   const fs = require("node:fs");
   const path = require("node:path");
   const appsDir = path.join(__dirname, "../../../apps");
@@ -125,10 +126,16 @@ export function setupBaseInfra() {
       const appDirs = fs
         .readdirSync(appsDir, { withFileTypes: true })
         .filter((dirent: any) => dirent.isDirectory())
-        .map((dirent: any) => dirent.name);
+        .map((dirent: any) => dirent.name)
+        .filter((name: string) => {
+          // Exclude apps that don't use private GHCR images
+          // secure-demo uses public nginx image, doesn't need GHCR secret
+          const publicImageApps = ["secure-demo", "hello-world", "storage-validator"];
+          return !publicImageApps.includes(name);
+        });
 
       monorepoAppNamespaces = [...monorepoAppNamespaces, ...appDirs];
-      pulumi.log.info(`Auto-discovered monorepo apps: ${appDirs.join(", ")}`);
+      pulumi.log.info(`Auto-discovered GHCR apps: ${appDirs.join(", ")}`);
     }
   } catch (error) {
     pulumi.log.warn(`Could not read apps directory: ${error}`);
