@@ -11,10 +11,6 @@ import { createLonghornPrecheck } from "./validation";
  * - Built-in snapshots and backup
  * - Automatic R2 cloud backup integration
  * - Web UI for management
- *
- * Note: Longhorn lifecycle hooks (pre-upgrade, post-upgrade, uninstall) can cause
- * field manager conflicts with existing resources. The configuration below uses
- * transformations to skip awaiting on these hooks to prevent state conflicts.
  */
 
 // Create namespace for Longhorn
@@ -105,29 +101,6 @@ export const longhorn = new k8s.helm.v3.Chart(
   },
   {
     dependsOn: [namespace, ...(backupSecret ? [backupSecret] : [])],
-    // Transformations to prevent field manager conflicts and state synchronization issues
-    // with Longhorn lifecycle hooks
-    transformations: [
-      (resource: any) => {
-        // Skip awaiting Jobs that are Helm lifecycle hooks
-        // These can cause field manager conflicts if the namespace or resources are
-        // being recreated, or if multiple Pulumi instances try to manage them
-        const isLifecycleHook =
-          resource.type === "kubernetes:batch/v1:Job" &&
-          (resource.name?.includes("pre-upgrade") ||
-            resource.name?.includes("post-upgrade") ||
-            resource.name?.includes("uninstall"));
-
-        if (isLifecycleHook) {
-          // Don't wait for lifecycle hook jobs to complete
-          // They often fail or get stuck, but don't affect the actual deployment
-          resource.opts = resource.opts || {};
-          resource.opts.skipAwait = true;
-        }
-
-        return resource;
-      },
-    ],
   }
 );
 
