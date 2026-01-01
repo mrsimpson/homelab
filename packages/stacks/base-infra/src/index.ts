@@ -8,11 +8,13 @@
  * - cert-manager for automatic TLS certificates
  * - ingress-nginx for HTTP(S) routing
  * - External Secrets Operator for secret management
+ * - Authelia for centralized authentication
  *
  * Exports the infrastructure context that can be used by applications.
  */
 
 import * as pulumi from "@pulumi/pulumi";
+import * as k8s from "@pulumi/kubernetes";
 import * as coreInfra from "@mrsimpson/homelab-core-infrastructure";
 import { baseInfraConfig } from "./config";
 import { HomelabContext } from "@mrsimpson/homelab-core-components";
@@ -31,6 +33,63 @@ export const pulumiStack = pulumi.getStack();
  * ExposedWebApp instances with infrastructure dependencies injected.
  */
 export function setupBaseInfra() {
+  // Deploy Authelia for centralized authentication
+  const authelia = coreInfra.createAuthelia({
+    domain: pulumi.interpolate`auth.${baseInfraConfig.domain}`,
+    dependencies: {
+      ingressController: coreInfra.ingressNginx,
+      externalSecretsOperator: coreInfra.externalSecretsOperator,
+    },
+    storage: {
+      storageClass: "longhorn-persistent",
+      size: "1Gi", // Sufficient for <20 users
+    },
+  });
+
+  // Create ingress for Authelia portal
+  const autheliaIngress = new k8s.networking.v1.Ingress(
+    "authelia-ingress",
+    {
+      metadata: {
+        name: "authelia",
+        namespace: authelia.namespace.metadata.name,
+        annotations: {
+          "cert-manager.io/cluster-issuer": coreInfra.clusterIssuerName,
+          "nginx.ingress.kubernetes.io/ssl-redirect": "false", // Cloudflare Tunnel handles TLS
+        },
+      },
+      spec: {
+        ingressClassName: "nginx",
+        tls: [
+          {
+            hosts: [pulumi.interpolate`auth.${baseInfraConfig.domain}`],
+            secretName: "authelia-tls",
+          },
+        ],
+        rules: [
+          {
+            host: pulumi.interpolate`auth.${baseInfraConfig.domain}`,
+            http: {
+              paths: [
+                {
+                  path: "/",
+                  pathType: "Prefix",
+                  backend: {
+                    service: {
+                      name: authelia.service.metadata.name,
+                      port: { number: 80 },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+    { dependsOn: [authelia.service, coreInfra.letsEncryptIssuer] }
+  );
+
   // Create HomelavContext for dependency injection
   const homelabContext = new HomelabContext({
     cloudflare: {
@@ -46,6 +105,10 @@ export function setupBaseInfra() {
     },
     externalSecrets: {
       operator: coreInfra.externalSecretsOperator,
+    },
+    forwardAuth: {
+      verifyUrl: authelia.verifyUrl,
+      signinUrl: authelia.signinUrl,
     },
   });
 
@@ -99,6 +162,11 @@ export function setupBaseInfra() {
     },
     registrySecrets: {
       ghcrPullSecret: ghcrPullSecret,
+    },
+    auth: {
+      authelia: authelia,
+      autheliaIngress: autheliaIngress,
+      autheliaUrl: authelia.signinUrl,
     },
   };
 }

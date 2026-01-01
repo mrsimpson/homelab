@@ -36,16 +36,21 @@ logBackupStatus();
 // Export core infrastructure outputs for convenience
 export const tunnelId = baseInfra.cloudflare.tunnelId;
 export const tunnelCname = baseInfra.cloudflare.tunnelCname;
+export const autheliaUrl = baseInfra.auth.autheliaUrl;
 
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
+import { createSecureDemo } from "@mrsimpson/homelab-app-secure-demo";
 
 const helloWorldApp = createHelloWorld(homelab);
 export const helloWorldUrl = helloWorldApp.url;
 
 const nodejsDemoApp = createNodejsDemo(homelab);
 export const nodejsDemoUrl = nodejsDemoApp.url;
+
+const secureDemoApp = createSecureDemo(homelab);
+export const secureDemoUrl = secureDemoApp.url;
 
 // Storage validator - simple nginx-based storage test with automatic R2 backups
 export const storageValidatorApp = homelab.createExposedWebApp("storage-validator", {
