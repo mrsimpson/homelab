@@ -124,9 +124,20 @@ Or extend `packages/core/infrastructure/` for reusable modules.
 ## Requirements
 
 - Node.js >=24.0.0
+- npm (for workspace management)
 - k3s cluster (see `bootstrap/install-k3s.sh`)
 - Cloudflare account (for tunnel and DNS)
 - Pulumi account (for state management)
+
+## Installation
+
+```bash
+# Install dependencies
+npm install
+
+# Verify TypeScript compilation
+npm run type-check
+```
 
 ## License
 

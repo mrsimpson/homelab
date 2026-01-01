@@ -9,8 +9,8 @@
 		"clean": "rm -rf dist"
 	},
 	"dependencies": {
-		"@mrsimpson/homelab-config": "workspace:*",
-		"@mrsimpson/homelab-core-components": "workspace:*",
+		"@mrsimpson/homelab-config": "*",
+		"@mrsimpson/homelab-core-components": "*",
 		"@pulumi/pulumi": "^3.0.0"
 	},
 	"devDependencies": {
