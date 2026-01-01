@@ -10,13 +10,7 @@
     "format": "biome format --write src/",
     "type-check": "tsc --noEmit"
   },
-  "keywords": [
-    "pulumi",
-    "kubernetes",
-    "homelab",
-    "app",
-    "example"
-  ],
+  "keywords": ["pulumi", "kubernetes", "homelab", "app", "example"],
   "author": "mrsimpson",
   "license": "MIT",
   "repository": {

@@ -13,11 +13,11 @@
  * Exports the infrastructure context that can be used by applications.
  */
 
-import * as pulumi from "@pulumi/pulumi";
-import * as k8s from "@pulumi/kubernetes";
-import * as coreInfra from "@mrsimpson/homelab-core-infrastructure";
-import { baseInfraConfig } from "./config";
 import { HomelabContext } from "@mrsimpson/homelab-core-components";
+import * as coreInfra from "@mrsimpson/homelab-core-infrastructure";
+import * as k8s from "@pulumi/kubernetes";
+import * as pulumi from "@pulumi/pulumi";
+import { baseInfraConfig } from "./config";
 
 // Export config for reference in other stacks
 export { baseInfraConfig };
@@ -54,7 +54,7 @@ export function setupBaseInfra() {
         name: "authelia",
         namespace: authelia.namespace.metadata.name,
         annotations: {
-          "cert-manager.io/cluster-issuer": coreInfra.clusterIssuerName,
+          "cert-manager.io/cluster-issuer": coreInfra.clusterIssuerName || "letsencrypt-prod",
           "nginx.ingress.kubernetes.io/ssl-redirect": "false", // Cloudflare Tunnel handles TLS
         },
       },
@@ -87,10 +87,68 @@ export function setupBaseInfra() {
         ],
       },
     },
-    { dependsOn: [authelia.service, coreInfra.letsEncryptIssuer] }
+    {
+      dependsOn: [
+        authelia.service,
+        ...(coreInfra.letsEncryptIssuer ? [coreInfra.letsEncryptIssuer] : []),
+      ],
+    }
   );
 
-  // Create HomelavContext for dependency injection
+  // Auto-discover monorepo apps and create namespaces first
+  // This reads the packages/apps directory to find all monorepo apps
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const appsDir = path.join(__dirname, "../../../apps");
+
+  let appDirs: string[] = [];
+  const appNamespaces: Record<string, k8s.core.v1.Namespace> = {};
+
+  try {
+    if (fs.existsSync(appsDir)) {
+      appDirs = fs
+        .readdirSync(appsDir, { withFileTypes: true })
+        .filter((dirent: any) => dirent.isDirectory())
+        .map((dirent: any) => dirent.name);
+
+      pulumi.log.info(`Auto-discovered apps: ${appDirs.join(", ")}`);
+
+      // Create namespaces early for all discovered apps
+      // This ensures namespaces exist before GHCR pull secrets are created
+      for (const appName of appDirs) {
+        appNamespaces[appName] = new k8s.core.v1.Namespace(`${appName}-ns-early`, {
+          metadata: {
+            name: appName,
+            labels: {
+              app: appName,
+              "managed-by": "base-infra",
+              environment: pulumi.getStack(),
+              // Pod Security Standards enforcement (restricted)
+              "pod-security.kubernetes.io/enforce": "restricted",
+              "pod-security.kubernetes.io/audit": "restricted",
+              "pod-security.kubernetes.io/warn": "restricted",
+            },
+          },
+        });
+      }
+    }
+  } catch (error) {
+    pulumi.log.warn(`Could not read apps directory: ${error}`);
+  }
+
+  // Create GHCR pull secret for private container images
+  // This creates ImagePullSecrets in all discovered monorepo app namespaces + default
+  // External apps can create their own using createGhcrImagePullSecret() helper
+  const monorepoAppNamespaces = ["default", ...appDirs];
+  const ghcrPullSecret = coreInfra.createGhcrPullSecret(
+    {
+      externalSecretsOperator: coreInfra.externalSecretsOperator,
+      namespaces: monorepoAppNamespaces,
+    },
+    { dependsOn: Object.values(appNamespaces) }
+  );
+
+  // Create HomelabContext for dependency injection with namespaces included
   const homelabContext = new HomelabContext({
     cloudflare: {
       zoneId: baseInfraConfig.cloudflare.zoneId,
@@ -110,48 +168,13 @@ export function setupBaseInfra() {
       verifyUrl: authelia.verifyUrl,
       signinUrl: authelia.signinUrl,
     },
-  });
-
-  // Auto-discover monorepo apps and create GHCR pull secrets
-  // This reads the packages/apps directory to find all monorepo apps
-  // that use private GHCR images
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const appsDir = path.join(__dirname, "../../../apps");
-
-  let monorepoAppNamespaces = ["default"]; // Always include default
-
-  try {
-    if (fs.existsSync(appsDir)) {
-      const appDirs = fs
-        .readdirSync(appsDir, { withFileTypes: true })
-        .filter((dirent: any) => dirent.isDirectory())
-        .map((dirent: any) => dirent.name)
-        .filter((name: string) => {
-          // Exclude apps that don't use private GHCR images
-          // secure-demo uses public nginx image, doesn't need GHCR secret
-          const publicImageApps = ["secure-demo", "hello-world", "storage-validator"];
-          return !publicImageApps.includes(name);
-        });
-
-      monorepoAppNamespaces = [...monorepoAppNamespaces, ...appDirs];
-      pulumi.log.info(`Auto-discovered GHCR apps: ${appDirs.join(", ")}`);
-    }
-  } catch (error) {
-    pulumi.log.warn(`Could not read apps directory: ${error}`);
-  }
-
-  // Create GHCR pull secret for private container images
-  // This creates ImagePullSecrets in all discovered monorepo app namespaces
-  // External apps can create their own using createGhcrImagePullSecret() helper
-  const ghcrPullSecret = coreInfra.createGhcrPullSecret({
-    externalSecretsOperator: coreInfra.externalSecretsOperator,
-    namespaces: monorepoAppNamespaces,
+    namespaces: appNamespaces,
   });
 
   // Export infrastructure details
   return {
     context: homelabContext,
+    namespaces: appNamespaces, // Export created namespaces for apps to reference
     cloudflare: {
       tunnel: coreInfra.tunnel,
       tunnelCname: coreInfra.tunnelCname,

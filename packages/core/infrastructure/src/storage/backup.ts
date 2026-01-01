@@ -1,6 +1,6 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
-import { getBackupCredentials, backupTargetRoot, hasBackupCredentials } from "./r2-buckets";
+import { backupTargetRoot, getBackupCredentials, hasBackupCredentials } from "./r2-buckets";
 
 /**
  * Longhorn Backup Configuration
@@ -29,13 +29,13 @@ export interface BackupConfig {
 export function getBackupConfig(): BackupConfig {
   const accountId = config.require("cloudflareAccountId");
   const s3Endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
-  
+
   const hasCredentials = hasBackupCredentials();
-  let creds = { 
-    accessKeyId: pulumi.secret(""), 
-    secretAccessKey: pulumi.secret("") 
+  let creds = {
+    accessKeyId: pulumi.secret(""),
+    secretAccessKey: pulumi.secret(""),
   };
-  
+
   if (hasCredentials) {
     creds = getBackupCredentials();
   }
@@ -77,7 +77,7 @@ export function createBackupSecret(
 
 /**
  * Creates a daily backup recurring job
- * 
+ *
  * Only create this if backup credentials are available
  */
 export function createDailyBackupJob(

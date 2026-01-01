@@ -1,6 +1,6 @@
-import * as pulumi from "@pulumi/pulumi";
 import { homelabConfig } from "@mrsimpson/homelab-config";
-import type { HomelabContext, ExposedWebApp } from "@mrsimpson/homelab-core-components";
+import type { ExposedWebApp, HomelabContext } from "@mrsimpson/homelab-core-components";
+import * as pulumi from "@pulumi/pulumi";
 
 /**
  * Storage Validator - Simple webapp to validate persistent storage

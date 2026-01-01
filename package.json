@@ -55,9 +55,6 @@
     "@pulumi/random": "^4.16.0"
   },
   "lint-staged": {
-    "**/*.{ts,tsx}": [
-      "biome check --write --organize-imports-enabled=true",
-      "tsc --noEmit"
-    ]
+    "**/*.{ts,tsx}": ["biome check --write --organize-imports-enabled=true", "tsc --noEmit"]
   }
 }

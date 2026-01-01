@@ -123,6 +123,8 @@ export interface ExposedWebAppArgs {
     runAsGroup?: number;
     fsGroup?: number;
   };
+  /** Optional pre-created namespace (if not provided, will create one) */
+  namespace?: k8s.core.v1.Namespace;
 
   // Infrastructure dependencies (all optional)
   /** Cloudflare DNS configuration */
@@ -149,24 +151,26 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 
     const childOpts = { parent: this };
 
-    // Create namespace for the app
-    const namespace = new k8s.core.v1.Namespace(
-      `${name}-ns`,
-      {
-        metadata: {
-          name: name,
-          labels: {
-            app: name,
-            environment: pulumi.getStack(),
-            // Pod Security Standards enforcement (restricted)
-            "pod-security.kubernetes.io/enforce": "restricted",
-            "pod-security.kubernetes.io/audit": "restricted",
-            "pod-security.kubernetes.io/warn": "restricted",
+    // Use provided namespace or create a new one
+    const namespace =
+      args.namespace ||
+      new k8s.core.v1.Namespace(
+        `${name}-ns`,
+        {
+          metadata: {
+            name: name,
+            labels: {
+              app: name,
+              environment: pulumi.getStack(),
+              // Pod Security Standards enforcement (restricted)
+              "pod-security.kubernetes.io/enforce": "restricted",
+              "pod-security.kubernetes.io/audit": "restricted",
+              "pod-security.kubernetes.io/warn": "restricted",
+            },
           },
         },
-      },
-      childOpts
-    );
+        childOpts
+      );
 
     // Optional: Create PVC for persistent storage
     if (args.storage) {
@@ -338,7 +342,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 
     // Forward authentication (Authelia)
     if (args.requireAuth && args.forwardAuth) {
-      const responseHeaders = args.forwardAuth.responseHeaders || "Remote-User,Remote-Email,Remote-Groups";
+      const responseHeaders =
+        args.forwardAuth.responseHeaders || "Remote-User,Remote-Email,Remote-Groups";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] = args.forwardAuth.verifyUrl;
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] = args.forwardAuth.signinUrl;
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] = responseHeaders;

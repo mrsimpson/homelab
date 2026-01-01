@@ -39,12 +39,6 @@
     }
   },
   "files": {
-    "ignore": [
-      "node_modules",
-      "dist",
-      "build",
-      ".pulumi",
-      "*.config.js"
-    ]
+    "ignore": ["node_modules", "dist", "build", ".pulumi", "*.config.js"]
   }
 }

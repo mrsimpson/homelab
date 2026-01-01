@@ -2,18 +2,12 @@
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "responsible-vibe-mcp": {
-      "command": [
-        "npx",
-        "responsible-vibe-mcp"
-      ],
+      "command": ["npx", "responsible-vibe-mcp"],
       "type": "local",
       "enabled": true
     },
     "quiet-shell-mcp": {
-      "command": [
-        "npx",
-        "@codemcp/quiet-shell"
-      ],
+      "command": ["npx", "@codemcp/quiet-shell"],
       "type": "local",
       "enabled": true
     }

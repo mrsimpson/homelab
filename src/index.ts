@@ -19,7 +19,7 @@ import {
   uncriticalStorageClass,
 } from "@mrsimpson/homelab-core-infrastructure";
 
-// Initialize base infrastructure and get the context
+// Initialize base infrastructure and get the context (now includes namespaces)
 const baseInfra = setupBaseInfra();
 export const homelab = baseInfra.context;
 
