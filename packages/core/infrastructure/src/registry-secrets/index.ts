@@ -18,6 +18,8 @@ import * as pulumi from "@pulumi/pulumi";
 export interface RegistrySecretsArgs {
   /** External Secrets Operator resource to depend on */
   externalSecretsOperator: pulumi.Resource;
+  /** Explicit output that represents webhook readiness (optional but recommended) */
+  webhookReady?: pulumi.Output<any>;
   /** ClusterSecretStore name (defaults to "pulumi-esc") */
   storeName?: string;
   /** List of namespaces to create the pull secret in (defaults to ["default"]) */
@@ -49,7 +51,13 @@ export function createGhcrPullSecret(
   const namespaces = args.namespaces || ["default"];
 
   // Build resource options with combined dependencies
-  const baseDeps = [args.externalSecretsOperator];
+  const baseDeps: pulumi.Input<pulumi.Input<pulumi.Resource>[]> = [args.externalSecretsOperator];
+
+  // If webhookReady is provided, add it to dependencies to ensure webhook is responding
+  if (args.webhookReady) {
+    baseDeps.push(args.webhookReady);
+  }
+
   const optsDeps = opts?.dependsOn
     ? Array.isArray(opts.dependsOn)
       ? opts.dependsOn
@@ -62,6 +70,10 @@ export function createGhcrPullSecret(
   };
 
   // Create ExternalSecret in each namespace
+  // NOTE: ExternalSecrets are validated by the external-secrets-webhook which takes time to stabilize.
+  // The webhook may experience transient failures when external-secrets is first deployed.
+  // We add the externalSecretsOperator as an explicit dependency and rely on Pulumi's
+  // resource dependency system to ensure proper ordering and retry behavior.
   const externalSecrets = namespaces.map(
     (ns) =>
       new k8s.apiextensions.CustomResource(
@@ -131,7 +143,13 @@ export function createDockerHubPullSecret(
   const namespaces = args.namespaces || ["default"];
 
   // Build resource options with combined dependencies
-  const baseDeps = [args.externalSecretsOperator];
+  const baseDeps: pulumi.Input<pulumi.Input<pulumi.Resource>[]> = [args.externalSecretsOperator];
+
+  // If webhookReady is provided, add it to dependencies to ensure webhook is responding
+  if (args.webhookReady) {
+    baseDeps.push(args.webhookReady);
+  }
+
   const optsDeps = opts?.dependsOn
     ? Array.isArray(opts.dependsOn)
       ? opts.dependsOn
