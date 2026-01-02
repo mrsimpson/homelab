@@ -167,8 +167,15 @@ Complete the Authelia authentication stack by ensuring PostgreSQL deployment is 
 - [x] Export createLonghornNodeConfig from storage module
 - [x] Add Longhorn node configuration to longhorn.ts deployment
 - [x] Verify Longhorn node configuration is included in Pulumi stack (✅ CONFIRMED via preview)
+- [x] Deploy Longhorn node configuration via Pulumi up (✅ CREATED SUCCESSFULLY)
 - [ ] Deploy missing Authelia components via Pulumi up
 - [ ] Verify Authelia deployment completes successfully
+
+### Completed
+- [x] Codified manual Longhorn disk configuration in Pulumi code
+- [x] Created longhorn-node-config-flinker resource via pulumi up
+- [x] Verified node configuration is active in cluster
+- [x] Confirmed PostgreSQL pod remains healthy after deployment
 
 ### Completed
 - [x] Fixed longhorn.ts import issues
@@ -190,10 +197,28 @@ Complete the Authelia authentication stack by ensuring PostgreSQL deployment is 
 *None yet*
 
 ## Key Decisions
-*Important decisions will be documented here as they are made*
+1. **Longhorn Node Configuration**: Codified the manual disk configuration in Pulumi code (node-config.ts) to make storage provisioning reproducible and eliminate need for manual kubectl patches.
+
+2. **Cloudflare Tunnel State Issue**: Discovered that Cloudflare tunnel "homelab-k3s" exists in Cloudflare infrastructure but is not in Pulumi state. This blocks deployment of remaining components. Recommend either:
+   - Import existing tunnel via `pulumi import`
+   - Generate unique tunnel name to avoid conflict
+   - Contact Pulumi support if state corruption is suspected
 
 ## Notes
-*Additional context and observations*
+### PostgreSQL & Storage Status
+- ✅ PostgreSQL pod running and healthy (1/1 Ready, 35+ minutes uptime)
+- ✅ Longhorn node "flinker" properly configured with disk /var/lib/longhorn/
+- ✅ Storage volumes healthy and scheduled (2Gi in use, 1TB available)
+- ✅ Daily R2 backups configured automatically
+
+### Deployment Blockers
+1. **Longhorn uninstall job** - Lifecycle hook was failing, resolved by removing from state and Kubernetes
+2. **Cloudflare tunnel** - Exists in Cloudflare but not in Pulumi state, needs import or rename
+
+### Next Steps
+- Fix Cloudflare tunnel state issue to allow Authelia deployment
+- Deploy Authelia main app (deployment, service, ingress, ConfigMaps already coded)
+- Verify Authelia deployment completes successfully
 
 ---
 *This plan is maintained by the LLM. Tool responses provide guidance on which section to focus on and what tasks to work on.*
