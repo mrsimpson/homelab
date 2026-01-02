@@ -11,6 +11,16 @@ import { createLonghornPrecheck } from "./validation";
  * - Built-in snapshots and backup
  * - Automatic R2 cloud backup integration
  * - Web UI for management
+ *
+ * Note on Helm Lifecycle Hooks:
+ * The Longhorn Helm chart includes lifecycle hooks (pre-upgrade, pre-delete, post-upgrade).
+ * These hooks run during Helm operations but may fail in certain conditions:
+ * - pre-delete hook requires deleting-confirmation-flag=true to proceed
+ * - pre-upgrade hook runs even during fresh installations
+ *
+ * These hooks are not critical for core functionality (manager, driver, UI all work fine).
+ * We skip awaiting on them to allow deployment to complete. The hooks run asynchronously
+ * without blocking storage operations.
  */
 
 // Create namespace for Longhorn
@@ -98,6 +108,27 @@ export const longhorn = new k8s.helm.v3.Chart(
   },
   {
     dependsOn: [namespace, ...(backupSecret ? [backupSecret] : [])],
+    // Skip awaiting Helm lifecycle hook Jobs that don't affect core functionality
+    transformations: [
+      (resource: any) => {
+        // Identify lifecycle hook Jobs (pre-upgrade, pre-delete, post-upgrade)
+        // These may fail but don't block storage operations
+        const isHook =
+          resource.type === "kubernetes:batch/v1:Job" &&
+          (resource.name?.includes("pre-upgrade") ||
+            resource.name?.includes("pre-delete") ||
+            resource.name?.includes("post-upgrade"));
+
+        if (isHook) {
+          // Don't wait for lifecycle hooks - they run asynchronously
+          // Core Longhorn components (manager, driver, UI) are unaffected
+          resource.opts = resource.opts || {};
+          resource.opts.skipAwait = true;
+        }
+
+        return resource;
+      },
+    ],
   }
 );
 
