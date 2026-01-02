@@ -25,8 +25,6 @@ export const baseInfraConfig = {
 
   // cert-manager configuration
   certManager: {
-    // On first deployment, set skipClusterIssuer=true, then false after cert-manager is ready
-    skipClusterIssuer: config.getBoolean("skipClusterIssuer") ?? false,
     letsEncryptServer:
       config.get("letsEncryptServer") || "https://acme-v02.api.letsencrypt.org/directory",
   },
