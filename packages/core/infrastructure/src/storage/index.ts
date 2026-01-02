@@ -19,3 +19,4 @@ export * from "./storage-classes";
 export * from "./validation";
 export * from "./backup";
 export * from "./r2-buckets";
+export * from "./node-config";

@@ -2,6 +2,7 @@ import * as k8s from "@pulumi/kubernetes";
 import { createBackupSecret, createDailyBackupJob, getBackupConfig } from "./backup";
 import { backupTargetRoot, hasBackupCredentials, logR2Status } from "./r2-buckets";
 import { createLonghornPrecheck } from "./validation";
+import { createLonghornNodeConfig } from "./node-config";
 
 /**
  * Longhorn - Distributed block storage for Kubernetes
@@ -141,6 +142,21 @@ const dailyBackupJob = hasBackupCredentials()
 // Run prerequisite validation before deploying Longhorn
 const precheckJob = createLonghornPrecheck(namespace.metadata.name);
 
+// Configure Longhorn node disk for K3s single-node cluster
+// In single-node K3s, the node "flinker" doesn't have dedicated storage disks.
+// We explicitly configure the default data path for Longhorn storage.
+// This ensures volumes can be provisioned even without dedicated block devices.
+//
+// Without this configuration, Longhorn's auto-discovery fails because:
+// - Auto-discovery expects labeled disks or separate block devices
+// - K3s single-node setups don't have separate disk partitions
+// - We need to explicitly designate the default data path for storage
+const nodeConfig = createLonghornNodeConfig({
+  nodeName: "flinker",
+  dataPath: "/var/lib/longhorn/",
+  dependencies: [longhorn],
+});
+
 // Log R2 backup status
 logR2Status();
 
@@ -148,3 +164,4 @@ export const longhornNamespace = "longhorn-system";
 export const longhornPrecheck = precheckJob;
 export const longhornBackupSecret = backupSecret;
 export const longhornBackupJob = dailyBackupJob;
+export const longhornNodeConfig = nodeConfig;
