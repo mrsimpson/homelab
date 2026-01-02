@@ -34,9 +34,6 @@ const backupSecret = hasBackupCredentials()
   ? createBackupSecret("longhorn-system", backupConfig)
   : undefined;
 
-// Create daily backup recurring job if credentials are available
-const dailyBackupJob = createDailyBackupJob("longhorn-system");
-
 // Install Longhorn via Helm with conditional R2 backup integration
 export const longhorn = new k8s.helm.v3.Chart(
   "longhorn",
@@ -103,6 +100,12 @@ export const longhorn = new k8s.helm.v3.Chart(
     dependsOn: [namespace, ...(backupSecret ? [backupSecret] : [])],
   }
 );
+
+// Create daily backup recurring job AFTER Longhorn is deployed
+// The Helm chart deploys the RecurringJob CRD, so we need this dependency
+const dailyBackupJob = hasBackupCredentials()
+  ? createDailyBackupJob("longhorn-system", { dependsOn: [longhorn] })
+  : undefined;
 
 // Run prerequisite validation before deploying Longhorn
 const precheckJob = createLonghornPrecheck(namespace.metadata.name);

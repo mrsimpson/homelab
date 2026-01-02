@@ -81,7 +81,8 @@ export function createBackupSecret(
  * Only create this if backup credentials are available
  */
 export function createDailyBackupJob(
-  namespace: string
+  namespace: string,
+  opts?: pulumi.CustomResourceOptions
 ): k8s.apiextensions.CustomResource | undefined {
   if (!hasBackupCredentials()) {
     pulumi.log.info("Skipping backup job creation - R2 credentials not configured");
@@ -90,29 +91,33 @@ export function createDailyBackupJob(
 
   pulumi.log.info("Creating daily backup job - R2 credentials configured ✓");
 
-  return new k8s.apiextensions.CustomResource("backup-job-daily", {
-    apiVersion: "longhorn.io/v1beta2",
-    kind: "RecurringJob",
-    metadata: {
-      name: "backup-daily",
-      namespace: namespace,
-      labels: {
-        "app.kubernetes.io/name": "longhorn",
-        "app.kubernetes.io/component": "backup-job",
+  return new k8s.apiextensions.CustomResource(
+    "backup-job-daily",
+    {
+      apiVersion: "longhorn.io/v1beta2",
+      kind: "RecurringJob",
+      metadata: {
+        name: "backup-daily",
+        namespace: namespace,
+        labels: {
+          "app.kubernetes.io/name": "longhorn",
+          "app.kubernetes.io/component": "backup-job",
+        },
+      },
+      spec: {
+        name: "backup-daily",
+        cron: "0 2 * * *", // 2 AM daily
+        task: "backup",
+        retain: 7,
+        concurrency: 1,
+        groups: ["default"],
+        labels: {
+          "backup-policy": "daily",
+        },
       },
     },
-    spec: {
-      name: "backup-daily",
-      cron: "0 2 * * *", // 2 AM daily
-      task: "backup",
-      retain: 7,
-      concurrency: 1,
-      groups: ["default"],
-      labels: {
-        "backup-policy": "daily",
-      },
-    },
-  });
+    opts
+  );
 }
 
 /**
