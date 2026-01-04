@@ -241,10 +241,8 @@ export function createAuthelia(args: AutheliaConfig) {
         namespace: namespace.metadata.name,
       },
       data: {
-        "configuration.yml": pulumi
-          .all([args.domain, postgresService.metadata.name, storageEncryptionKey])
-          .apply(
-            ([domain, pgServiceName, encryption]) => `---
+        "configuration.yml": pulumi.all([args.domain, postgresService.metadata.name]).apply(
+          ([domain, pgServiceName]) => `---
 theme: auto
 default_2fa_method: totp
 
@@ -288,6 +286,12 @@ session:
   expiration: 1h
   inactivity: 5m
   remember_me: 1M
+  cookies:
+    - domain: ${domain.replace(/^auth\./, "")}
+      name: authelia_session
+      expiration: 1h
+      inactivity: 5m
+      remember_me: 1M
 
 regulation:
   max_retries: 5
@@ -295,7 +299,7 @@ regulation:
   ban_time: 5m
 
 storage:
-  encryption_key: ${encryption}
+  encryption_key: \${STORAGE_ENCRYPTION_KEY}
   postgres:
     address: 'tcp://${pgServiceName}:5432'
     database: authelia
@@ -305,9 +309,8 @@ storage:
 notifier:
   disable_startup_check: true
   filesystem:
-    filename: /config/notifications.txt
-`
-          ),
+    filename: /config/notifications.txt`
+        ),
       },
     },
     { dependsOn: [namespace, postgresService] }
