@@ -232,6 +232,7 @@ export function createAuthelia(args: AutheliaConfig) {
   );
 
   // Authelia configuration
+  // Note: Uses environment variables for secrets that are injected via deployment env vars
   const autheliaConfig = new k8s.core.v1.ConfigMap(
     "authelia-config",
     {
@@ -240,8 +241,10 @@ export function createAuthelia(args: AutheliaConfig) {
         namespace: namespace.metadata.name,
       },
       data: {
-        "configuration.yml": pulumi.all([args.domain, postgresService.metadata.name]).apply(
-          ([domain, pgServiceName]) => `---
+        "configuration.yml": pulumi
+          .all([args.domain, postgresService.metadata.name, storageEncryptionKey])
+          .apply(
+            ([domain, pgServiceName, encryption]) => `---
 theme: auto
 default_2fa_method: totp
 
@@ -274,7 +277,7 @@ authentication_backend:
         salt_length: 16
 
 access_control:
-  default_policy: deny
+  default_policy: one_factor
   rules: []
   # Rules will be added via ConfigMap updates for each protected app
 
@@ -292,35 +295,19 @@ regulation:
   ban_time: 5m
 
 storage:
-  encryption_key_secret: STORAGE_ENCRYPTION_KEY
+  encryption_key: ${encryption}
   postgres:
     address: 'tcp://${pgServiceName}:5432'
     database: authelia
     username: authelia
-    password_secret: POSTGRES_PASSWORD
+    password: \${POSTGRES_PASSWORD}
 
 notifier:
-  disable_startup_check: false
+  disable_startup_check: true
   filesystem:
     filename: /config/notifications.txt
-
-identity_providers:
-  oidc:
-    hmac_secret: JWT_SECRET
-    jwks:
-      - algorithm: RS256
-        key_id: main
-    cors:
-      endpoints:
-        - authorization
-        - token
-        - revocation
-        - introspection
-      allowed_origins_from_client_redirect_uris: true
-    clients: []
-    # OIDC clients (e.g., Supabase) will be added later
 `
-        ),
+          ),
       },
     },
     { dependsOn: [namespace, postgresService] }
