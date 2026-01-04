@@ -112,13 +112,14 @@ export const longhorn = new k8s.helm.v3.Chart(
     // Skip awaiting Helm lifecycle hook Jobs that don't affect core functionality
     transformations: [
       (resource: any) => {
-        // Identify lifecycle hook Jobs (pre-upgrade, pre-delete, post-upgrade)
+        // Identify lifecycle hook Jobs (pre-upgrade, pre-delete, post-upgrade, uninstall)
         // These may fail but don't block storage operations
         const isHook =
           resource.type === "kubernetes:batch/v1:Job" &&
           (resource.name?.includes("pre-upgrade") ||
             resource.name?.includes("pre-delete") ||
-            resource.name?.includes("post-upgrade"));
+            resource.name?.includes("post-upgrade") ||
+            resource.name?.includes("uninstall"));
 
         if (isHook) {
           // Don't wait for lifecycle hooks - they run asynchronously
