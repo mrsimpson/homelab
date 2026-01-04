@@ -123,10 +123,11 @@ export const longhorn = new k8s.helm.v3.Chart(
 
         if (isHook) {
           // Ignore all changes and don't wait for these jobs
+          // Keep them in cluster even if Pulumi stack is deleted
           resource.opts = resource.opts || {};
-          resource.opts.ignoreChanges = [];
+          resource.opts.ignoreChanges = ["*"];
           resource.opts.skipAwait = true;
-          resource.opts.additionalSecretOutputs = [];
+          resource.opts.retainOnDelete = true;
         }
 
         return resource;
