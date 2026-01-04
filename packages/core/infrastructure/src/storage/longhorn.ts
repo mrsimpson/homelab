@@ -109,11 +109,11 @@ export const longhorn = new k8s.helm.v3.Chart(
   },
   {
     dependsOn: [namespace, ...(backupSecret ? [backupSecret] : [])],
-    // Don't manage Helm lifecycle hook Jobs - they fail and aren't needed
+    // Skip managing Helm lifecycle hook Jobs
     transformations: [
       (resource: any) => {
         // Identify lifecycle hook Jobs (pre-upgrade, pre-delete, post-upgrade, uninstall)
-        // These are created by Helm but fail frequently and don't affect core storage operations
+        // These are created by Helm but fail repeatedly and aren't critical
         const isHook =
           resource.type === "kubernetes:batch/v1:Job" &&
           (resource.name?.includes("pre-upgrade") ||
@@ -122,9 +122,11 @@ export const longhorn = new k8s.helm.v3.Chart(
             resource.name?.includes("uninstall"));
 
         if (isHook) {
-          // Return undefined to skip tracking these jobs in Pulumi
-          // The Helm chart will still create them, but Pulumi won't manage them
-          return undefined;
+          // Ignore all changes and don't wait for these jobs
+          resource.opts = resource.opts || {};
+          resource.opts.ignoreChanges = [];
+          resource.opts.skipAwait = true;
+          resource.opts.additionalSecretOutputs = [];
         }
 
         return resource;
