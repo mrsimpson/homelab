@@ -280,15 +280,11 @@ access_control:
   # Rules will be added via ConfigMap updates for each protected app
 
 session:
-  name: authelia_session
-  domain: ${domain.replace(/^auth\./, "")}
-  same_site: lax
-  expiration: 1h
-  inactivity: 5m
-  remember_me: 1M
   cookies:
     - domain: ${domain.replace(/^auth\./, "")}
       name: authelia_session
+      authelia_url: https://${domain}
+      same_site: lax
       expiration: 1h
       inactivity: 5m
       remember_me: 1M
@@ -309,7 +305,11 @@ storage:
 notifier:
   disable_startup_check: true
   filesystem:
-    filename: /config/notifications.txt`
+    filename: /config/notifications.txt
+
+identity_validation:
+  reset_password:
+    jwt_secret: \${JWT_SECRET}`
         ),
       },
     },

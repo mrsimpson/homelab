@@ -122,10 +122,11 @@ export const longhorn = new k8s.helm.v3.Chart(
             resource.name?.includes("uninstall"));
 
         if (isHook) {
-          // Don't wait for lifecycle hooks - they run asynchronously
-          // Core Longhorn components (manager, driver, UI) are unaffected
+          // Don't wait for lifecycle hooks and ignore all status changes
+          // These hooks are optional and may not exist depending on Helm chart version
           resource.opts = resource.opts || {};
           resource.opts.skipAwait = true;
+          resource.opts.ignoreChanges = ["status", "spec"];
         }
 
         return resource;
