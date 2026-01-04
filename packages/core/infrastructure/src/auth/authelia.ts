@@ -328,17 +328,15 @@ identity_validation:
       },
       data: {
         "users_database.yml": `---
-users: {}
-# Users will be added manually or via automation
-# Example:
-#  john:
-#    disabled: false
-#    displayname: "John Doe"
-#    password: "$argon2id$v=19$m=65536,t=3,p=4$..."
-#    email: john@example.com
-#    groups:
-#      - admins
-#      - developers
+users:
+  admin:
+    disabled: false
+    displayname: "Admin User"
+    password: "$argon2id$v=19$m=65536,t=3,p=4$+6YvgeQqEAqj+XYaUgSDqQ$VDI8bPuf6Z1MZ2D4UeCLmYapF2gQ03JjWARegllBUV0"
+    email: admin@example.com
+    groups:
+      - admins
+# Additional users can be added via ConfigMap updates or automation
 `,
       },
     },
