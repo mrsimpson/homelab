@@ -241,8 +241,10 @@ export function createAuthelia(args: AutheliaConfig) {
         namespace: namespace.metadata.name,
       },
       data: {
-        "configuration.yml": pulumi.all([args.domain, postgresService.metadata.name]).apply(
-          ([domain, pgServiceName]) => `---
+        "configuration.yml": pulumi
+          .all([args.domain, postgresService.metadata.name, postgresPassword])
+          .apply(
+            ([domain, pgServiceName, dbPassword]) => `---
 theme: auto
 default_2fa_method: totp
 
@@ -300,7 +302,7 @@ storage:
     address: 'tcp://${pgServiceName}:5432'
     database: authelia
     username: authelia
-    password: \${POSTGRES_PASSWORD}
+    password: ${dbPassword}
 
 notifier:
   disable_startup_check: true
@@ -310,7 +312,7 @@ notifier:
 identity_validation:
   reset_password:
     jwt_secret: \${JWT_SECRET}`
-        ),
+          ),
       },
     },
     { dependsOn: [namespace, postgresService] }
