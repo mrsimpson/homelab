@@ -347,6 +347,20 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] = args.forwardAuth.verifyUrl;
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] = args.forwardAuth.signinUrl;
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] = responseHeaders;
+
+      // CRITICAL: Pass correct X-Forwarded-Proto to auth endpoint
+      // nginx normally uses $scheme which is 'http' when Cloudflare connects via HTTP
+      // We need to use X-Forwarded-Proto from the request instead so Authelia
+      // receives the real scheme (https) in X-Original-URL and doesn't reject the request
+      const authSnippet = `# Determine the correct scheme (https from Cloudflare, or http otherwise)
+set $auth_scheme $scheme;
+if ($http_x_forwarded_proto != "") {
+  set $auth_scheme $http_x_forwarded_proto;
+}
+# Ensure nginx passes the correct X-Original-URL to the auth endpoint
+proxy_set_header X-Original-URL $auth_scheme://$http_host$request_uri;`;
+
+      ingressAnnotations["nginx.ingress.kubernetes.io/configuration-snippet"] = authSnippet;
     }
 
     // Forward headers from proxy (Cloudflare, ingress controller)

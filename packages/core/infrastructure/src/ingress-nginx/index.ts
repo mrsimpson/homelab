@@ -69,6 +69,9 @@ export const ingressNginx = new k8s.helm.v3.Chart(
           "use-forwarded-headers": "true",
           "compute-full-forwarded-for": "true",
           "use-proxy-protocol": "false",
+          // Enable configuration snippets for ingress annotations
+          // Required to pass correct X-Forwarded-Proto to auth endpoints
+          "allow-snippet-annotations": "true",
         },
       },
     },
