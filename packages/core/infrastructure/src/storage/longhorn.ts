@@ -1,8 +1,8 @@
 import * as k8s from "@pulumi/kubernetes";
 import { createBackupSecret, createDailyBackupJob, getBackupConfig } from "./backup";
+import { createLonghornNodeConfig } from "./node-config";
 import { backupTargetRoot, hasBackupCredentials, logR2Status } from "./r2-buckets";
 import { createLonghornPrecheck } from "./validation";
-import { createLonghornNodeConfig } from "./node-config";
 
 /**
  * Longhorn - Distributed block storage for Kubernetes

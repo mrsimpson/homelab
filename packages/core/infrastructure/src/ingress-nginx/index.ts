@@ -54,6 +54,15 @@ export const ingressNginx = new k8s.helm.v3.Chart(
         ingressClassResource: {
           default: true,
         },
+        // Configuration for all ingresses
+        config: {
+          // Trust X-Forwarded-* headers from Cloudflare tunnel and reverse proxies
+          // This tells nginx that the X-Forwarded-Proto, X-Forwarded-For, X-Forwarded-Host headers
+          // from Cloudflare tunnel are trustworthy and should be used for backend communication
+          "use-forwarded-headers": "true",
+          "compute-full-forwarded-for": "true",
+          "use-proxy-protocol": "false",
+        },
       },
     },
   },

@@ -349,6 +349,14 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] = responseHeaders;
     }
 
+    // Forward headers from proxy (Cloudflare, ingress controller)
+    // This allows backends to know the real client IP, protocol (HTTPS), and host
+    // Critical for Authelia to know requests are HTTPS and to generate correct redirect URLs
+    if (args.cloudflare || (args.requireAuth && args.forwardAuth)) {
+      ingressAnnotations["nginx.ingress.kubernetes.io/use-forwarded-headers"] = "true";
+      ingressAnnotations["nginx.ingress.kubernetes.io/compute-full-forwarded-for"] = "true";
+    }
+
     // Create Ingress
     this.ingress = new k8s.networking.v1.Ingress(
       `${name}-ingress`,

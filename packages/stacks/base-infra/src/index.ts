@@ -60,6 +60,8 @@ export function setupBaseInfra() {
         annotations: {
           "cert-manager.io/cluster-issuer": coreInfra.clusterIssuerName || "letsencrypt-prod",
           "nginx.ingress.kubernetes.io/ssl-redirect": "false", // Cloudflare Tunnel handles TLS
+          "nginx.ingress.kubernetes.io/use-forwarded-headers": "true", // Pass X-Forwarded-* headers to backend
+          "nginx.ingress.kubernetes.io/compute-full-forwarded-for": "true", // Compute X-Forwarded-For
         },
       },
       spec: {
