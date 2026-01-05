@@ -352,13 +352,16 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       // nginx normally uses $scheme which is 'http' when Cloudflare connects via HTTP
       // We need to use X-Forwarded-Proto from the request instead so Authelia
       // receives the real scheme (https) in X-Original-URL and doesn't reject the request
+      // For Authelia v4.38, we need both X-Original-URL and X-Original-Method headers
       const authSnippet = `# Determine the correct scheme (https from Cloudflare, or http otherwise)
 set $auth_scheme $scheme;
 if ($http_x_forwarded_proto != "") {
   set $auth_scheme $http_x_forwarded_proto;
 }
-# Ensure nginx passes the correct X-Original-URL to the auth endpoint
-proxy_set_header X-Original-URL $auth_scheme://$http_host$request_uri;`;
+# Ensure nginx passes the correct X-Original-URL and X-Original-Method to the auth endpoint
+# Note: proxy_set_header works for auth_request subrequests in modern nginx ingress
+proxy_set_header X-Original-URL $auth_scheme://$http_host$request_uri;
+proxy_set_header X-Original-Method $request_method;`;
 
       ingressAnnotations["nginx.ingress.kubernetes.io/configuration-snippet"] = authSnippet;
     }
