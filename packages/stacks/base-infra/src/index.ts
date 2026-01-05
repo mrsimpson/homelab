@@ -36,6 +36,10 @@ export function setupBaseInfra() {
   // Deploy Authelia for centralized authentication
   const authelia = coreInfra.createAuthelia({
     domain: pulumi.interpolate`auth.${baseInfraConfig.domain}`,
+    cloudflare: {
+      zoneId: baseInfraConfig.cloudflare.zoneId,
+      tunnelCname: coreInfra.tunnelCname,
+    },
     dependencies: {
       ingressController: coreInfra.ingressNginx,
       externalSecretsOperator: coreInfra.externalSecretsOperator,

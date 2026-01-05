@@ -1,4 +1,5 @@
 import * as k8s from "@pulumi/kubernetes";
+import * as cloudflare from "@pulumi/cloudflare";
 import * as pulumi from "@pulumi/pulumi";
 
 /**
@@ -41,6 +42,14 @@ export interface AutheliaConfig {
     storageClass?: string;
     /** Size of PostgreSQL PVC (defaults to 1Gi, suitable for <20 users) */
     size?: string;
+  };
+
+  /** Cloudflare configuration for DNS record (optional) */
+  cloudflare?: {
+    /** Cloudflare Zone ID */
+    zoneId: string;
+    /** CNAME value (usually the Cloudflare Tunnel hostname) */
+    tunnelCname: string | pulumi.Output<string>;
   };
 
   /** Dependencies */
@@ -502,6 +511,22 @@ users:
     { dependsOn: [autheliaDeployment] }
   );
 
+  // Create Cloudflare DNS record for Authelia portal if Cloudflare config is provided
+  let authelia_DnsRecord: cloudflare.Record | undefined;
+  if (args.cloudflare) {
+    // Extract subdomain from domain (e.g., "auth.example.com" -> "auth")
+    const subdomain = pulumi.output(args.domain).apply((domain) => domain.split(".")[0]);
+
+    authelia_DnsRecord = new cloudflare.Record("authelia-dns", {
+      zoneId: args.cloudflare.zoneId,
+      name: subdomain as any, // Type assertion needed for pulumi.Output<string>
+      type: "CNAME",
+      content: args.cloudflare.tunnelCname,
+      comment: "Managed by Pulumi - Authelia authentication portal",
+      proxied: true,
+    });
+  }
+
   // Return resources for use by other components
   return {
     namespace,
@@ -510,6 +535,7 @@ users:
     configMap: autheliaConfig,
     usersConfigMap: usersDatabase,
     postgresService,
+    dnsRecord: authelia_DnsRecord,
 
     // Auth URLs for ingress annotations
     // Use FQDN for proper service discovery (works with ClusterFirstWithHostNet DNS policy on ingress)
