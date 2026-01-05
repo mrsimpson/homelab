@@ -259,16 +259,6 @@ default_2fa_method: totp
 
 server:
   address: 'tcp://0.0.0.0:9091'
-  endpoints:
-    authz:
-      auth-request:
-        implementation: 'AuthRequest'
-        authn_strategies:
-          - name: 'CookieSession'
-          - name: 'HeaderAuthorization'
-            schemes:
-              - 'Bearer'
-              - 'Basic'
 
 log:
   level: info
