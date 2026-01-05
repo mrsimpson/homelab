@@ -341,7 +341,7 @@ users:
   admin:
     disabled: false
     displayname: "Admin User"
-    password: "$argon2id$v=19$m=65536,t=3,p=4$+6YvgeQqEAqj+XYaUgSDqQ$VDI8bPuf6Z1MZ2D4UeCLmYapF2gQ03JjWARegllBUV0"
+    password: "$argon2id$v=19$m=65536,t=3,p=4$oeiJ+TD2tP81UkG2gFA09w$SAkup7Gi7bjGXBrEZ6VNNxBcMaJ8W4nrro6qCoA1nwk"
     email: admin@example.com
     groups:
       - admins
@@ -373,6 +373,9 @@ users:
             labels: { app: "authelia" },
           },
           spec: {
+            // Disable automatic service link environment variables to prevent Authelia config parsing errors
+            // Kubernetes injects AUTHELIA_SERVICE_* env vars which conflict with Authelia's deprecation mapping
+            enableServiceLinks: false,
             securityContext: {
               runAsNonRoot: true,
               runAsUser: 1000,
