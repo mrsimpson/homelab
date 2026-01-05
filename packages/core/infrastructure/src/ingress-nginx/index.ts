@@ -37,6 +37,9 @@ export const ingressNginx = new k8s.helm.v3.Chart(
       controller: {
         // Use hostNetwork since k3s doesn't have LoadBalancer by default
         hostNetwork: true,
+        // When using hostNetwork, we need ClusterFirstWithHostNet to properly resolve cluster DNS
+        // This allows the pod to resolve internal service FQDNs like authelia.authelia.svc.cluster.local
+        dnsPolicy: "ClusterFirstWithHostNet",
         hostPort: {
           enabled: true,
           ports: {

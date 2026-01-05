@@ -512,8 +512,8 @@ users:
     postgresService,
 
     // Auth URLs for ingress annotations
-    // Use ClusterIP instead of FQDN to avoid DNS resolution issues in hostNetwork ingress pods
-    verifyUrl: pulumi.interpolate`http://${autheliaService.spec.clusterIP}/api/verify`,
+    // Use FQDN for proper service discovery (works with ClusterFirstWithHostNet DNS policy on ingress)
+    verifyUrl: pulumi.interpolate`http://${autheliaService.metadata.name}.${namespace.metadata.name}.svc.cluster.local/api/verify`,
     signinUrl: pulumi.interpolate`https://${args.domain}`,
   };
 }
