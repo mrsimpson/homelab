@@ -30,10 +30,11 @@ export function createSecureDemo(homelab: HomelabContext): {
     image: "nginxinc/nginx-unprivileged:alpine",
     domain,
     port: 8080,
-    replicas: 1,
+    replicas: 2, // High availability - match nodejs-demo
 
     // Enable forward authentication
     // This will add nginx ingress annotations to forward auth checks to Authelia
+    // The forwardAuth configuration is automatically injected from homelab context
     requireAuth: true,
 
     resources: {
