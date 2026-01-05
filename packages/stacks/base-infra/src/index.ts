@@ -62,6 +62,10 @@ export function setupBaseInfra() {
           "nginx.ingress.kubernetes.io/ssl-redirect": "false", // Cloudflare Tunnel handles TLS
           "nginx.ingress.kubernetes.io/use-forwarded-headers": "true", // Pass X-Forwarded-* headers to backend
           "nginx.ingress.kubernetes.io/compute-full-forwarded-for": "true", // Compute X-Forwarded-For
+          // Allow Cloudflare bot challenge script execution and Authelia inline styles
+          "nginx.ingress.kubernetes.io/configuration-snippet": `
+            add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://challenges.cloudflare.com;" always;
+          `,
         },
       },
       spec: {

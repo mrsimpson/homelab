@@ -259,6 +259,16 @@ default_2fa_method: totp
 
 server:
   address: 'tcp://0.0.0.0:9091'
+  endpoints:
+    authz:
+      auth-request:
+        implementation: 'AuthRequest'
+        authn_strategies:
+          - name: 'CookieSession'
+          - name: 'HeaderAuthorization'
+            schemes:
+              - 'Bearer'
+              - 'Basic'
 
 log:
   level: info
@@ -295,6 +305,7 @@ session:
     - domain: ${domain.replace(/^auth\./, "")}
       name: authelia_session
       authelia_url: https://${domain}
+      default_redirection_url: https://${domain.replace(/^auth\./, "")}
       same_site: lax
       expiration: 1h
       inactivity: 5m
