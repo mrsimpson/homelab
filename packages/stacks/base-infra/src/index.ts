@@ -94,6 +94,7 @@ export function setupBaseInfra() {
     {
       dependsOn: [
         authelia.service,
+        ...(authelia.dnsRecord ? [authelia.dnsRecord] : []),
         ...(coreInfra.letsEncryptIssuer ? [coreInfra.letsEncryptIssuer] : []),
       ],
     }
