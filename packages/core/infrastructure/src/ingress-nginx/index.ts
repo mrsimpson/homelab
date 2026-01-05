@@ -54,6 +54,13 @@ export const ingressNginx = new k8s.helm.v3.Chart(
         ingressClassResource: {
           default: true,
         },
+        // CRITICAL: Use Recreate strategy instead of RollingUpdate
+        // Reason: hostPort (80, 443) binding prevents multiple replicas on same node
+        // RollingUpdate tries to create new pod before deleting old one, causing port conflicts
+        // Recreate deletes old pod first, then creates new one (acceptable for single-node homelab)
+        strategy: {
+          type: "Recreate",
+        },
         // Configuration for all ingresses
         config: {
           // Trust X-Forwarded-* headers from Cloudflare tunnel and reverse proxies
