@@ -73,6 +73,31 @@ export function setupBaseInfra() {
     pulumi.log.warn(`Could not read apps directory: ${error}`);
   }
 
+  // Ensure all core infrastructure is deployed before proceeding.
+  // Create a marker resource that depends on all infrastructure components.
+  // This forces Pulumi to deploy them in sequence and prevents race conditions
+  // where resources try to deploy into namespaces that don't exist yet.
+  const infrastructureReady = new k8s.core.v1.ConfigMap(
+    "base-infra-ready",
+    {
+      metadata: {
+        name: "base-infra-ready",
+        namespace: "kube-system",
+      },
+      data: {
+        ready: "true",
+      },
+    },
+    {
+      dependsOn: [
+        coreInfra.certManager,
+        coreInfra.ingressNginx,
+        coreInfra.externalSecretsOperator,
+        coreInfra.tunnel, // Cloudflare tunnel
+      ],
+    }
+  );
+
   // Create HomelavContext for dependency injection
   const homelabContext = new HomelabContext({
     cloudflare: {
@@ -95,15 +120,17 @@ export function setupBaseInfra() {
   // Create GHCR pull secret for private container images
   // This creates ImagePullSecrets in all discovered monorepo app namespaces + default
   // External apps can create their own using createGhcrImagePullSecret() helper
-  // Must depend on both app namespaces AND externalSecretsOperator to ensure
-  // namespaces and CRDs are available before creating ExternalSecret resources
+  // Must depend on ALL infrastructure to be ready (via the marker resource)
+  // This ensures namespaces, CRDs, and webhooks are all available
   const monorepoAppNamespaces = ["default", ...appDirs];
   const ghcrPullSecret = coreInfra.createGhcrPullSecret(
     {
       externalSecretsOperator: coreInfra.externalSecretsOperator,
       namespaces: monorepoAppNamespaces,
     },
-    { dependsOn: [...Object.values(appNamespaces), coreInfra.externalSecretsOperator] }
+    {
+      dependsOn: [...Object.values(appNamespaces), infrastructureReady],
+    }
   );
 
   // Export infrastructure details
