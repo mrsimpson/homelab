@@ -34,12 +34,13 @@ const namespace = new k8s.core.v1.Namespace("external-secrets", {
 // where ExternalSecret resources are validated before webhook pods are ready.
 // This allows resources to be created even if the webhook isn't responding yet,
 // preventing the "service not found" errors during cluster initialization.
+// Use implicit dependency by passing namespace.metadata.name as an Output
 export const externalSecretsOperator = new k8s.helm.v3.Chart(
   "external-secrets",
   {
     chart: "external-secrets",
     version: "0.11.0",
-    namespace: namespace.metadata.name,
+    namespace: namespace.metadata.apply((m) => m.name),
     fetchOpts: {
       repo: "https://charts.external-secrets.io",
     },
