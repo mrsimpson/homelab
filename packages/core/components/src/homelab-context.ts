@@ -1,10 +1,11 @@
+import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type {
-	CloudflareConfig,
-	ExposedWebAppArgs,
-	ExternalSecretsConfig,
-	IngressConfig,
-	TLSConfig,
+  CloudflareConfig,
+  ExposedWebAppArgs,
+  ExternalSecretsConfig,
+  IngressConfig,
+  TLSConfig,
 } from "./ExposedWebApp";
 import { ExposedWebApp } from "./ExposedWebApp";
 
@@ -15,36 +16,34 @@ import { ExposedWebApp } from "./ExposedWebApp";
  * ExposedWebApp instances without needing to pass all dependencies every time.
  */
 export interface HomelabContextConfig {
-	cloudflare?: CloudflareConfig;
-	tls?: TLSConfig;
-	ingress?: IngressConfig;
-	externalSecrets?: ExternalSecretsConfig;
+  cloudflare?: CloudflareConfig;
+  tls?: TLSConfig;
+  ingress?: IngressConfig;
+  externalSecrets?: ExternalSecretsConfig;
+  namespaces?: Record<string, k8s.core.v1.Namespace>;
 }
 
 export class HomelabContext {
-	constructor(private readonly config: HomelabContextConfig) {}
+  constructor(private readonly config: HomelabContextConfig) {}
 
-	/**
-	 * Creates an ExposedWebApp with infrastructure dependencies automatically injected
-	 */
-	createExposedWebApp(
-		name: string,
-		args: Omit<
-			ExposedWebAppArgs,
-			"cloudflare" | "tls" | "ingress" | "externalSecrets"
-		>,
-		opts?: pulumi.ComponentResourceOptions,
-	): ExposedWebApp {
-		return new ExposedWebApp(
-			name,
-			{
-				...args,
-				cloudflare: this.config.cloudflare,
-				tls: this.config.tls,
-				ingress: this.config.ingress,
-				externalSecrets: this.config.externalSecrets,
-			},
-			opts,
-		);
-	}
+  /**
+   * Creates an ExposedWebApp with infrastructure dependencies automatically injected
+   */
+  createExposedWebApp(
+    name: string,
+    args: Omit<ExposedWebAppArgs, "cloudflare" | "tls" | "ingress" | "externalSecrets">,
+    opts?: pulumi.ComponentResourceOptions
+  ): ExposedWebApp {
+    return new ExposedWebApp(
+      name,
+      {
+        ...args,
+        cloudflare: this.config.cloudflare,
+        tls: this.config.tls,
+        ingress: this.config.ingress,
+        externalSecrets: this.config.externalSecrets,
+      },
+      opts
+    );
+  }
 }

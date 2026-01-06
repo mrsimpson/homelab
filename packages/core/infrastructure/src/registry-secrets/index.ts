@@ -41,9 +41,16 @@ export interface RegistrySecretsArgs {
  *   // Then in ExposedWebApp:
  *   imagePullSecrets: [{ name: "ghcr-pull-secret" }]
  */
-export function createGhcrPullSecret(args: RegistrySecretsArgs) {
+export function createGhcrPullSecret(args: RegistrySecretsArgs, opts?: pulumi.ResourceOptions) {
   const storeName = args.storeName || "pulumi-esc";
   const namespaces = args.namespaces || ["default"];
+
+  // Build dependency list
+  const dependencies = [args.externalSecretsOperator];
+  if (opts?.dependsOn) {
+    const depArray = Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
+    dependencies.push(...(depArray as pulumi.Resource[]));
+  }
 
   // Create ExternalSecret in each namespace
   const externalSecrets = namespaces.map(
@@ -89,7 +96,7 @@ export function createGhcrPullSecret(args: RegistrySecretsArgs) {
             ],
           },
         },
-        { dependsOn: [args.externalSecretsOperator] }
+        { dependsOn: dependencies }
       )
   );
 
@@ -107,9 +114,19 @@ export function createGhcrPullSecret(args: RegistrySecretsArgs) {
  * - Key: dockerhub-credentials/username
  * - Key: dockerhub-credentials/token (secret)
  */
-export function createDockerHubPullSecret(args: RegistrySecretsArgs) {
+export function createDockerHubPullSecret(
+  args: RegistrySecretsArgs,
+  opts?: pulumi.ResourceOptions
+) {
   const storeName = args.storeName || "pulumi-esc";
   const namespaces = args.namespaces || ["default"];
+
+  // Build dependency list
+  const dependencies = [args.externalSecretsOperator];
+  if (opts?.dependsOn) {
+    const depArray = Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
+    dependencies.push(...(depArray as pulumi.Resource[]));
+  }
 
   const externalSecrets = namespaces.map(
     (ns) =>
@@ -162,7 +179,7 @@ export function createDockerHubPullSecret(args: RegistrySecretsArgs) {
             ],
           },
         },
-        { dependsOn: [args.externalSecretsOperator] }
+        { dependsOn: dependencies }
       )
   );
 
