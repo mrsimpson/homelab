@@ -34,14 +34,14 @@ export const externalSecretsNamespace = new k8s.core.v1.Namespace("external-secr
 // where ExternalSecret resources are validated before webhook pods are ready.
 // This allows resources to be created even if the webhook isn't responding yet,
 // preventing the "service not found" errors during cluster initialization.
-// Use implicit dependency by passing namespace.metadata.name as an Output
-export const externalSecretsOperator = new k8s.helm.v3.Chart(
+// Use explicit namespace string with explicit dependsOn to ensure namespace is created first
+export const externalSecretsOperator = new k8s.helm.v3.Release(
   "external-secrets",
   {
     chart: "external-secrets",
     version: "0.11.0",
-    namespace: externalSecretsNamespace.metadata.apply((m: any) => m.name),
-    fetchOpts: {
+    namespace: "external-secrets", // Use string directly, dependsOn ensures it exists
+    repositoryOpts: {
       repo: "https://charts.external-secrets.io",
     },
     values: {
@@ -74,7 +74,7 @@ export const externalSecretsOperator = new k8s.helm.v3.Chart(
       },
     },
   },
-  { dependsOn: [externalSecretsNamespace] }
+  { dependsOn: [externalSecretsNamespace] } // CRITICAL: Explicit dependency on namespace resource
 );
 
 // Create Pulumi API token secret for ESO to access Pulumi ESC
@@ -85,13 +85,13 @@ const pulumiApiTokenSecret = new k8s.core.v1.Secret(
   {
     metadata: {
       name: "pulumi-api-token",
-      namespace: externalSecretsNamespace.metadata.apply((m: any) => m.name),
+      namespace: "external-secrets", // Use string directly, dependsOn ensures it exists
     },
     stringData: {
       token: config.requireSecret("pulumiAccessToken"),
     },
   },
-  { dependsOn: [externalSecretsNamespace, externalSecretsOperator] }
+  { dependsOn: [externalSecretsNamespace, externalSecretsOperator] } // CRITICAL: Explicit dependencies
 );
 
 // Configure Pulumi ESC as a ClusterSecretStore backend

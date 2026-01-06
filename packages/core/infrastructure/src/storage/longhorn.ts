@@ -38,13 +38,13 @@ const backupSecret = hasBackupCredentials()
 const dailyBackupJob = createDailyBackupJob("longhorn-system");
 
 // Install Longhorn via Helm with conditional R2 backup integration
-// Use implicit dependency by passing longhornNamespaceResource.metadata.apply((m: any) => m.name) as an Output
+// Use explicit namespace string with explicit dependsOn to ensure namespace is created first
 export const longhorn = new k8s.helm.v3.Release(
   "longhorn",
   {
     chart: "longhorn",
     version: "1.7.2",
-    namespace: longhornNamespaceResource.metadata.apply((m: any) => m.name),
+    namespace: "longhorn-system", // Use string directly, dependsOn ensures it exists
     repositoryOpts: {
       repo: "https://charts.longhorn.io",
     },

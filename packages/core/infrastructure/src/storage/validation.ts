@@ -8,40 +8,45 @@ import type * as pulumi from "@pulumi/pulumi";
  * before Longhorn deployment proceeds.
  */
 
-export function createLonghornPrecheck(namespace: pulumi.Output<string>): k8s.batch.v1.Job {
-  return new k8s.batch.v1.Job("longhorn-precheck", {
-    metadata: {
-      name: "longhorn-precheck",
-      namespace: namespace,
-      labels: {
-        app: "longhorn-precheck",
-        component: "validation",
+export function createLonghornPrecheck(
+  namespace: pulumi.Output<string>,
+  opts?: pulumi.ResourceOptions
+): k8s.batch.v1.Job {
+  return new k8s.batch.v1.Job(
+    "longhorn-precheck",
+    {
+      metadata: {
+        name: "longhorn-precheck",
+        namespace: namespace,
+        labels: {
+          app: "longhorn-precheck",
+          component: "validation",
+        },
       },
-    },
-    spec: {
-      template: {
-        spec: {
-          restartPolicy: "Never",
-          tolerations: [
-            {
-              key: "node-role.kubernetes.io/master",
-              operator: "Exists",
-              effect: "NoSchedule",
-            },
-            {
-              key: "node-role.kubernetes.io/control-plane",
-              operator: "Exists",
-              effect: "NoSchedule",
-            },
-          ],
-          containers: [
-            {
-              name: "precheck",
-              image: "alpine:latest",
-              command: ["/bin/sh"],
-              args: [
-                "-c",
-                `
+      spec: {
+        template: {
+          spec: {
+            restartPolicy: "Never",
+            tolerations: [
+              {
+                key: "node-role.kubernetes.io/master",
+                operator: "Exists",
+                effect: "NoSchedule",
+              },
+              {
+                key: "node-role.kubernetes.io/control-plane",
+                operator: "Exists",
+                effect: "NoSchedule",
+              },
+            ],
+            containers: [
+              {
+                name: "precheck",
+                image: "alpine:latest",
+                command: ["/bin/sh"],
+                args: [
+                  "-c",
+                  `
                 echo "🔍 Checking Longhorn prerequisites on host system..."
                 
                 # Check if iscsiadm is available on the host
@@ -79,33 +84,35 @@ export function createLonghornPrecheck(namespace: pulumi.Output<string>): k8s.ba
                 echo "✅ Host system appears ready for Longhorn deployment"
                 echo ""
                 `,
-              ],
-              securityContext: {
-                privileged: true,
-              },
-              volumeMounts: [
-                {
-                  name: "host-proc",
-                  mountPath: "/host/proc",
-                  readOnly: true,
+                ],
+                securityContext: {
+                  privileged: true,
                 },
-              ],
-            },
-          ],
-          volumes: [
-            {
-              name: "host-proc",
-              hostPath: {
-                path: "/proc",
+                volumeMounts: [
+                  {
+                    name: "host-proc",
+                    mountPath: "/host/proc",
+                    readOnly: true,
+                  },
+                ],
               },
-            },
-          ],
-          hostNetwork: true,
-          hostPID: true,
+            ],
+            volumes: [
+              {
+                name: "host-proc",
+                hostPath: {
+                  path: "/proc",
+                },
+              },
+            ],
+            hostNetwork: true,
+            hostPID: true,
+          },
         },
+        backoffLimit: 1, // Don't retry on failure
+        ttlSecondsAfterFinished: 600, // Clean up after 10 minutes
       },
-      backoffLimit: 1, // Don't retry on failure
-      ttlSecondsAfterFinished: 600, // Clean up after 10 minutes
     },
-  });
+    opts
+  );
 }

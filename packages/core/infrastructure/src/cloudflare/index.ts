@@ -54,7 +54,7 @@ const tunnelConfig = new k8s.core.v1.ConfigMap(
   {
     metadata: {
       name: "tunnel-config",
-      namespace: cloudflaredNamespace.metadata.name,
+      namespace: "cloudflare", // Use string directly, dependsOn ensures it exists
     },
     data: {
       "config.yaml": `tunnel: homelab-k3s
@@ -68,7 +68,7 @@ ingress:
     },
   },
   {
-    dependsOn: [cloudflaredNamespace],
+    dependsOn: [cloudflaredNamespace], // CRITICAL: Explicit dependency on namespace resource
   }
 );
 
@@ -78,7 +78,7 @@ const tunnelCredsSecret = new k8s.core.v1.Secret(
   {
     metadata: {
       name: "tunnel-credentials",
-      namespace: cloudflaredNamespace.metadata.name,
+      namespace: "cloudflare", // Use string directly, dependsOn ensures it exists
     },
     stringData: {
       "credentials.json": pulumi
@@ -93,7 +93,7 @@ const tunnelCredsSecret = new k8s.core.v1.Secret(
     },
   },
   {
-    dependsOn: [cloudflaredNamespace, tunnel],
+    dependsOn: [cloudflaredNamespace, tunnel], // CRITICAL: Explicit dependency on namespace resource
   }
 );
 
@@ -103,7 +103,7 @@ export const cloudflaredDeployment = new k8s.apps.v1.Deployment(
   {
     metadata: {
       name: "cloudflared",
-      namespace: cloudflaredNamespace.metadata.name,
+      namespace: "cloudflare", // Use string directly, dependsOn ensures it exists
     },
     spec: {
       replicas: 2, // HA setup

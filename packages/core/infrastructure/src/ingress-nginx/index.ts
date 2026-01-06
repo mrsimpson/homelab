@@ -24,14 +24,14 @@ export const ingressNginxNamespace = new k8s.core.v1.Namespace("ingress-nginx-ns
   },
 });
 
-// Use implicit dependency by passing namespace.metadata.name as an Output
-export const ingressNginx = new k8s.helm.v3.Chart(
+// Use explicit namespace string with explicit dependsOn to ensure namespace is created first
+export const ingressNginx = new k8s.helm.v3.Release(
   "ingress-nginx",
   {
     chart: "ingress-nginx",
     version: "4.9.0",
-    namespace: ingressNginxNamespace.metadata.apply((m: any) => m.name),
-    fetchOpts: {
+    namespace: "ingress-nginx", // Use string directly, dependsOn ensures it exists
+    repositoryOpts: {
       repo: "https://kubernetes.github.io/ingress-nginx",
     },
     values: {
@@ -61,7 +61,7 @@ export const ingressNginx = new k8s.helm.v3.Chart(
     },
   },
   {
-    dependsOn: [ingressNginxNamespace],
+    dependsOn: [ingressNginxNamespace], // CRITICAL: Explicit dependency on namespace resource
   }
 );
 

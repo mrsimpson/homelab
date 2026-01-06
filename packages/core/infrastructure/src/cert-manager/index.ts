@@ -27,14 +27,14 @@ export const certManagerNamespace = new k8s.core.v1.Namespace("cert-manager-ns",
 });
 
 // Install cert-manager via Helm
-// Use implicit dependency by passing namespace.metadata.name as an Output
-export const certManager = new k8s.helm.v3.Chart(
+// Use explicit namespace string with explicit dependsOn to ensure namespace is created first
+export const certManager = new k8s.helm.v3.Release(
   "cert-manager",
   {
     chart: "cert-manager",
     version: "v1.14.0",
-    namespace: certManagerNamespace.metadata.apply((m) => m.name),
-    fetchOpts: {
+    namespace: "cert-manager", // Use string directly, dependsOn ensures it exists
+    repositoryOpts: {
       repo: "https://charts.jetstack.io",
     },
     values: {
@@ -47,7 +47,7 @@ export const certManager = new k8s.helm.v3.Chart(
     },
   },
   {
-    dependsOn: [certManagerNamespace], // Explicit dependency on namespace resource
+    dependsOn: [certManagerNamespace], // CRITICAL: Explicit dependency on namespace resource
   }
 );
 
