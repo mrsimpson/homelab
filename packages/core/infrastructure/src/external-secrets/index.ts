@@ -78,6 +78,7 @@ export const externalSecretsOperator = new k8s.helm.v3.Chart(
 
 // Create Pulumi API token secret for ESO to access Pulumi ESC
 // This token allows ESO to read secrets from Pulumi Cloud/ESC
+// Must depend on externalSecretsOperator to ensure namespace is created first
 const pulumiApiTokenSecret = new k8s.core.v1.Secret(
   "pulumi-api-token",
   {
@@ -89,7 +90,7 @@ const pulumiApiTokenSecret = new k8s.core.v1.Secret(
       token: config.requireSecret("pulumiAccessToken"),
     },
   },
-  { dependsOn: [namespace] }
+  { dependsOn: [externalSecretsOperator] }
 );
 
 // Configure Pulumi ESC as a ClusterSecretStore backend
