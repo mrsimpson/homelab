@@ -1,0 +1,4 @@
+config:
+  homelab:cloudflareAccountId: d7b9ae25800c5d4de9640890f7b6bb8c
+  homelab:cloudflareZoneId: 9007d8406ee5b613838ea52c3491e915
+  homelab:domain: no-panic.org

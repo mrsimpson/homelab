@@ -38,13 +38,13 @@ const backupSecret = hasBackupCredentials()
 const dailyBackupJob = createDailyBackupJob("longhorn-system");
 
 // Install Longhorn via Helm with conditional R2 backup integration
-export const longhorn = new k8s.helm.v3.Chart(
+export const longhorn = new k8s.helm.v3.Release(
   "longhorn",
   {
     chart: "longhorn",
     version: "1.7.2",
     namespace: "longhorn-system",
-    fetchOpts: {
+    repositoryOpts: {
       repo: "https://charts.longhorn.io",
     },
     values: {

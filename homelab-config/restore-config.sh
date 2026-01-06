@@ -13,7 +13,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/pulumi-config.enc.yaml"
-SOPS="${HOME}/go/bin/sops"
+SOPS="$(which sops)"
 TEMP_CONFIG=$(mktemp)
 TEMP_KEY=$(mktemp)
 trap "rm -f $TEMP_CONFIG $TEMP_KEY" EXIT
