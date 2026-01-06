@@ -73,10 +73,10 @@ export function setupBaseInfra() {
     pulumi.log.warn(`Could not read apps directory: ${error}`);
   }
 
-  // Ensure all core infrastructure is deployed before proceeding.
-  // Create a marker resource that depends on all infrastructure components.
-  // This forces Pulumi to deploy them in sequence and prevents race conditions
-  // where resources try to deploy into namespaces that don't exist yet.
+  // Ensure all core infrastructure namespaces are created before proceeding.
+  // Depend on the NAMESPACE RESOURCES (not Helm charts) to ensure they exist
+  // before any resources try to deploy into them.
+  // This prevents "namespace not found" errors during deployment.
   const infrastructureReady = new k8s.core.v1.ConfigMap(
     "base-infra-ready",
     {
@@ -90,10 +90,11 @@ export function setupBaseInfra() {
     },
     {
       dependsOn: [
-        coreInfra.certManager,
-        coreInfra.ingressNginx,
-        coreInfra.externalSecretsOperator,
-        coreInfra.tunnel, // Cloudflare tunnel
+        coreInfra.certManagerNamespace,
+        coreInfra.ingressNginxNamespace,
+        coreInfra.externalSecretsNamespace,
+        coreInfra.cloudflaredNamespace,
+        coreInfra.longhornNamespaceResource,
       ],
     }
   );

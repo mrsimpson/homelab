@@ -47,7 +47,7 @@ export const certManager = new k8s.helm.v3.Chart(
     },
   },
   {
-    dependsOn: [certManagerNamespace],
+    dependsOn: [certManagerNamespace], // Explicit dependency on namespace resource
   }
 );
 
