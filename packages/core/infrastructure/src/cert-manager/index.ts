@@ -14,7 +14,7 @@ import { homelabConfig } from "@mrsimpson/homelab-config";
 const config = new pulumi.Config();
 
 // Create namespace for cert-manager
-const namespace = new k8s.core.v1.Namespace("cert-manager-ns", {
+export const certManagerNamespace = new k8s.core.v1.Namespace("cert-manager-ns", {
   metadata: {
     name: "cert-manager",
     labels: {
@@ -33,7 +33,7 @@ export const certManager = new k8s.helm.v3.Chart(
   {
     chart: "cert-manager",
     version: "v1.14.0",
-    namespace: namespace.metadata.apply((m) => m.name),
+    namespace: certManagerNamespace.metadata.apply((m) => m.name),
     fetchOpts: {
       repo: "https://charts.jetstack.io",
     },
@@ -47,7 +47,7 @@ export const certManager = new k8s.helm.v3.Chart(
     },
   },
   {
-    dependsOn: [namespace],
+    dependsOn: [certManagerNamespace],
   }
 );
 

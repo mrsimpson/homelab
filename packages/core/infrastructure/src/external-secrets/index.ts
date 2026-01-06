@@ -17,7 +17,7 @@ import * as pulumi from "@pulumi/pulumi";
 const config = new pulumi.Config();
 
 // Create namespace for External Secrets Operator
-const namespace = new k8s.core.v1.Namespace("external-secrets", {
+export const externalSecretsNamespace = new k8s.core.v1.Namespace("external-secrets", {
   metadata: {
     name: "external-secrets",
     labels: {
@@ -40,7 +40,7 @@ export const externalSecretsOperator = new k8s.helm.v3.Chart(
   {
     chart: "external-secrets",
     version: "0.11.0",
-    namespace: namespace.metadata.apply((m) => m.name),
+    namespace: externalSecretsNamespace.metadata.apply((m: any) => m.name),
     fetchOpts: {
       repo: "https://charts.external-secrets.io",
     },
@@ -74,7 +74,7 @@ export const externalSecretsOperator = new k8s.helm.v3.Chart(
       },
     },
   },
-  { dependsOn: [namespace] }
+  { dependsOn: [externalSecretsNamespace] }
 );
 
 // Create Pulumi API token secret for ESO to access Pulumi ESC
@@ -85,13 +85,13 @@ const pulumiApiTokenSecret = new k8s.core.v1.Secret(
   {
     metadata: {
       name: "pulumi-api-token",
-      namespace: namespace.metadata.name,
+      namespace: externalSecretsNamespace.metadata.apply((m: any) => m.name),
     },
     stringData: {
       token: config.requireSecret("pulumiAccessToken"),
     },
   },
-  { dependsOn: [externalSecretsOperator] }
+  { dependsOn: [externalSecretsNamespace, externalSecretsOperator] }
 );
 
 // Configure Pulumi ESC as a ClusterSecretStore backend
@@ -124,8 +124,7 @@ export const pulumiEscStore = new k8s.apiextensions.CustomResource(
   { dependsOn: [externalSecretsOperator, pulumiApiTokenSecret] }
 );
 
-// Export status for verification
-export const externalSecretsNamespace = namespace.metadata.name;
+// Note: externalSecretsNamespace is already exported as the namespace resource at the top of this file
 
 // Future: Vault ClusterSecretStore (commented out for now)
 /*
@@ -153,7 +152,7 @@ export const vaultStore = new k8s.apiextensions.CustomResource(
       },
     },
   },
-  { dependsOn: [externalSecretsOperator] }
+  { dependsOn: [externalSecretsNamespace, externalSecretsOperator] }
 );
 */
 
@@ -183,6 +182,6 @@ export const awsSecretsManagerStore = new k8s.apiextensions.CustomResource(
       },
     },
   },
-  { dependsOn: [externalSecretsOperator] }
+  { dependsOn: [externalSecretsNamespace, externalSecretsOperator] }
 );
 */

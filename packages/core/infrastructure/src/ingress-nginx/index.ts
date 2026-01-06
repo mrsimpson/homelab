@@ -12,7 +12,7 @@ import * as k8s from "@pulumi/kubernetes";
 // Create namespace for ingress-nginx
 // Note: Using "privileged" because ingress-nginx requires hostNetwork and hostPort
 // This is necessary for k3s which doesn't have a LoadBalancer service
-const namespace = new k8s.core.v1.Namespace("ingress-nginx-ns", {
+export const ingressNginxNamespace = new k8s.core.v1.Namespace("ingress-nginx-ns", {
   metadata: {
     name: "ingress-nginx",
     labels: {
@@ -30,7 +30,7 @@ export const ingressNginx = new k8s.helm.v3.Chart(
   {
     chart: "ingress-nginx",
     version: "4.9.0",
-    namespace: namespace.metadata.apply((m) => m.name),
+    namespace: ingressNginxNamespace.metadata.apply((m: any) => m.name),
     fetchOpts: {
       repo: "https://kubernetes.github.io/ingress-nginx",
     },
@@ -61,7 +61,7 @@ export const ingressNginx = new k8s.helm.v3.Chart(
     },
   },
   {
-    dependsOn: [namespace],
+    dependsOn: [ingressNginxNamespace],
   }
 );
 

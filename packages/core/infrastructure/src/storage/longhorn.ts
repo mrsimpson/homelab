@@ -14,7 +14,7 @@ import { getBackupConfig, createBackupSecret, createDailyBackupJob } from "./bac
  */
 
 // Create namespace for Longhorn
-const namespace = new k8s.core.v1.Namespace("longhorn-ns", {
+export const longhornNamespaceResource = new k8s.core.v1.Namespace("longhorn-ns", {
   metadata: {
     name: "longhorn-system",
     labels: {
@@ -38,13 +38,13 @@ const backupSecret = hasBackupCredentials()
 const dailyBackupJob = createDailyBackupJob("longhorn-system");
 
 // Install Longhorn via Helm with conditional R2 backup integration
-// Use implicit dependency by passing namespace.metadata.name as an Output
+// Use implicit dependency by passing longhornNamespaceResource.metadata.apply((m: any) => m.name) as an Output
 export const longhorn = new k8s.helm.v3.Release(
   "longhorn",
   {
     chart: "longhorn",
     version: "1.7.2",
-    namespace: namespace.metadata.apply((m) => m.name),
+    namespace: longhornNamespaceResource.metadata.apply((m: any) => m.name),
     repositoryOpts: {
       repo: "https://charts.longhorn.io",
     },
@@ -101,12 +101,14 @@ export const longhorn = new k8s.helm.v3.Release(
     },
   },
   {
-    dependsOn: [namespace, ...(backupSecret ? [backupSecret] : [])],
+    dependsOn: [longhornNamespaceResource, ...(backupSecret ? [backupSecret] : [])],
   }
 );
 
 // Run prerequisite validation before deploying Longhorn
-const precheckJob = createLonghornPrecheck(namespace.metadata.name);
+const precheckJob = createLonghornPrecheck(
+  longhornNamespaceResource.metadata.apply((m) => m.name as string)
+);
 
 // Log R2 backup status
 logR2Status();
