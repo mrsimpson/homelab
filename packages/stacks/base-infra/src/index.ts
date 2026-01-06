@@ -137,6 +137,14 @@ export function setupBaseInfra() {
   // Export infrastructure details
   return {
     context: homelabContext,
+    // Core infrastructure namespaces - explicitly exported so Pulumi deploys them
+    namespaces: {
+      certManager: coreInfra.certManagerNamespace,
+      ingressNginx: coreInfra.ingressNginxNamespace,
+      externalSecrets: coreInfra.externalSecretsNamespace,
+      cloudflared: coreInfra.cloudflaredNamespace,
+      longhorn: coreInfra.longhornNamespaceResource,
+    },
     cloudflare: {
       tunnel: coreInfra.tunnel,
       tunnelCname: coreInfra.tunnelCname,
