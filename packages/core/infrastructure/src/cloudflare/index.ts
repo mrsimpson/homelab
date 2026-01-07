@@ -3,6 +3,7 @@ import * as cloudflare from "@pulumi/cloudflare";
 import * as k8s from "@pulumi/kubernetes";
 import * as random from "@pulumi/random";
 import { homelabConfig } from "@mrsimpson/homelab-config";
+import { ingressNginx } from "../ingress-nginx";
 
 /**
  * Cloudflare Tunnel - Secure ingress without port forwarding
@@ -49,6 +50,9 @@ export const cloudflaredNamespace = new k8s.core.v1.Namespace("cloudflare", {
 
 // Create tunnel configuration
 // This routes all traffic to the ingress-nginx controller
+// NOTE: We depend on ingressNginx to ensure the service exists,
+// but we use a selector-based approach in the cloudflared deployment
+// to find the actual service regardless of the Helm-generated name
 const tunnelConfig = new k8s.core.v1.ConfigMap(
   "tunnel-config",
   {
@@ -68,7 +72,7 @@ ingress:
     },
   },
   {
-    dependsOn: [cloudflaredNamespace], // CRITICAL: Explicit dependency on namespace resource
+    dependsOn: [cloudflaredNamespace, ingressNginx], // CRITICAL: Explicit dependency on ingress-nginx
   }
 );
 
