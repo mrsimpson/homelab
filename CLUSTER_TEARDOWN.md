@@ -184,3 +184,91 @@ cat Pulumi.dev.yaml
 pulumi up --stack dev --yes
 ```
 
+
+---
+
+## Deployment Status
+
+After successful `pulumi up`, verify the infrastructure is running:
+
+```bash
+# Check all namespaces are created
+$ kubectl get namespaces
+NAME                STATUS   AGE
+cert-manager        Active   5m
+cloudflare          Active   5m
+external-secrets    Active   5m
+hello-world         Active   5m
+ingress-nginx       Active   5m
+longhorn-system     Active   5m
+nodejs-demo         Active   5m
+storage-validator   Active   5m
+
+# Verify core infrastructure pods are running
+$ kubectl get pods -n cert-manager -n ingress-nginx
+NAME                                           READY   STATUS    RESTARTS   AGE
+cert-manager-46f4e900-566bd57c87-f4kmr         1/1     Running   0          5m
+cert-manager-46f4e900-cainjector-...           1/1     Running   0          5m
+cert-manager-46f4e900-webhook-b658d9575-...    1/1     Running   0          5m
+ingress-nginx-4d837d35-controller-...          1/1     Running   0          5m
+
+# Check storage classes
+$ kubectl get storageclass | grep longhorn
+longhorn                   driver.longhorn.io      Delete          Immediate              true           5m
+longhorn-persistent       driver.longhorn.io      Delete          WaitForFirstConsumer    true           5m
+longhorn-uncritical       driver.longhorn.io      Delete          WaitForFirstConsumer    true           5m
+```
+
+---
+
+## Key Implementation Details
+
+### Explicit Dependencies Fix
+
+The core fix for reliable cluster deployment was implementing **explicit `dependsOn` directives** on Helm releases:
+
+```typescript
+// Before (implicit dependency):
+export const certManager = new k8s.helm.v3.Chart(
+  "cert-manager",
+  {
+    namespace: certManagerNamespace.metadata.apply((m) => m.name), // Implicit dependency
+    // ...
+  },
+  {
+    dependsOn: [certManagerNamespace], // But also explicit - redundant
+  }
+);
+
+// After (explicit dependency):
+export const certManager = new k8s.helm.v3.Release(
+  "cert-manager",
+  {
+    namespace: "cert-manager", // String directly
+    // ...
+  },
+  {
+    dependsOn: [certManagerNamespace], // Explicit - clear and reliable
+  }
+);
+```
+
+This ensures:
+1. Namespace resource is created FIRST
+2. Helm release waits for namespace to exist
+3. No race conditions between namespace and Helm chart creation
+4. Pulumi's dependency engine can properly sequence all operations
+
+---
+
+## Architecture Note
+
+The fix demonstrates a key principle: **In Pulumi, explicit is better than implicit**
+
+- **Implicit dependencies** (via Output references) are convenient but can be missed by the dependency engine
+- **Explicit dependencies** (`dependsOn` array) guarantee proper sequencing
+- **String values** are concrete and don't create unnecessary complexity
+- **Resource exports** ensure resources are included in the stack
+
+This pattern is applied consistently across all infrastructure modules for reliable, repeatable deployments.
+
