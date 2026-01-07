@@ -61,36 +61,93 @@ echo
 # Step 1: Backup certificates and credentials
 log_info "Step 1/5: Backing up certificates and credentials..."
 
-CERT_FILES=(
-    "server/tls.crt"
-    "server/tls.key"
+# Backup critical CA certificates from /var/lib/rancher/k3s/server/tls/
+log_info "Backing up server TLS certificates..."
+TLS_BACKUP_DIR="$BACKUP_DIR/server/tls"
+mkdir -p "$TLS_BACKUP_DIR"
+
+# Critical server certificates that must be preserved
+CRITICAL_SERVER_CERTS=(
     "server-ca.crt"
     "server-ca.key"
+    "server-ca.nochain.crt"
     "client-ca.crt"
     "client-ca.key"
-    "token"
-    "kubeconfig.yaml"
+    "client-ca.nochain.crt"
+    "request-header-ca.crt"
+    "request-header-ca.key"
+    "serving-kube-apiserver.crt"
+    "serving-kube-apiserver.key"
+    "client-admin.crt"
+    "client-admin.key"
+    "service.key"
 )
 
-for file in "${CERT_FILES[@]}"; do
-    SOURCE_PATH="$K3S_CONFIG_DIR/$file"
-    BACKUP_PATH="$BACKUP_DIR/config/$(dirname "$file")"
-    
-    if [ -f "$SOURCE_PATH" ]; then
-        mkdir -p "$BACKUP_PATH"
-        cp -v "$SOURCE_PATH" "$BACKUP_PATH/$(basename "$file")" 2>/dev/null || true
-        log_success "Backed up: $file"
+for cert in "${CRITICAL_SERVER_CERTS[@]}"; do
+    SOURCE="$K3S_DATA_DIR/server/tls/$cert"
+    if [ -f "$SOURCE" ]; then
+        cp -v "$SOURCE" "$TLS_BACKUP_DIR/" 2>/dev/null || true
+        log_success "Backed up: server/tls/$cert"
+    else
+        log_warn "Not found: $cert"
     fi
 done
 
-# Backup kubelet certificates
-if [ -d "$K3S_DATA_DIR/agent/kubelet" ]; then
-    mkdir -p "$BACKUP_DIR/data/agent"
-    cp -r "$K3S_DATA_DIR/agent/kubelet" "$BACKUP_DIR/data/agent/" 2>/dev/null || true
-    log_success "Backed up kubelet certificates"
+# Backup etcd certificates
+log_info "Backing up etcd certificates..."
+ETCD_BACKUP_DIR="$BACKUP_DIR/server/tls/etcd"
+mkdir -p "$ETCD_BACKUP_DIR"
+
+ETCD_CERTS=(
+    "server-ca.crt"
+    "server-ca.key"
+    "peer-ca.crt"
+    "peer-ca.key"
+)
+
+for cert in "${ETCD_CERTS[@]}"; do
+    SOURCE="$K3S_DATA_DIR/server/tls/etcd/$cert"
+    if [ -f "$SOURCE" ]; then
+        cp -v "$SOURCE" "$ETCD_BACKUP_DIR/" 2>/dev/null || true
+        log_success "Backed up: etcd/$cert"
+    fi
+done
+
+# Backup server token
+log_info "Backing up server token..."
+if [ -f "$K3S_DATA_DIR/server/token" ]; then
+    mkdir -p "$BACKUP_DIR/server"
+    cp -v "$K3S_DATA_DIR/server/token" "$BACKUP_DIR/server/" 2>/dev/null || true
+    log_success "Backed up: server token"
 fi
 
+# NOTE: We do NOT backup the database - it will be recreated fresh on restore
+# The database is encrypted with the token, so we'll start with a clean slate
+
+# Backup agent certificates
+log_info "Backing up agent certificates..."
+AGENT_BACKUP_DIR="$BACKUP_DIR/agent"
+mkdir -p "$AGENT_BACKUP_DIR"
+
+AGENT_CERTS=(
+    "client-ca.crt"
+    "server-ca.crt"
+    "client-kubelet.crt"
+    "client-kubelet.key"
+    "serving-kubelet.crt"
+    "serving-kubelet.key"
+)
+
+for cert in "${AGENT_CERTS[@]}"; do
+    SOURCE="$K3S_DATA_DIR/agent/$cert"
+    if [ -f "$SOURCE" ]; then
+        cp -v "$SOURCE" "$AGENT_BACKUP_DIR/" 2>/dev/null || true
+        log_success "Backed up: agent/$cert"
+    fi
+done
+
 # Backup kubeconfig from default locations
+log_info "Backing up kubeconfig files..."
 for kubeconfig in ~/.kube/config /etc/rancher/k3s/k3s.yaml; do
     if [ -f "$kubeconfig" ]; then
         mkdir -p "$BACKUP_DIR/kubeconfigs"
