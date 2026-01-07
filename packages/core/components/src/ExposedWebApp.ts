@@ -166,6 +166,60 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       childOpts
     );
 
+    // Create GHCR pull secret if imagePullSecrets are specified
+    // This allows the app to pull private images from GitHub Container Registry
+    if (
+      args.imagePullSecrets &&
+      args.imagePullSecrets.length > 0 &&
+      args.externalSecrets?.operator
+    ) {
+      // Create ExternalSecret that syncs GHCR credentials from Pulumi ESC
+      new k8s.apiextensions.CustomResource(
+        `${name}-ghcr-pull-secret`,
+        {
+          apiVersion: "external-secrets.io/v1beta1",
+          kind: "ExternalSecret",
+          metadata: {
+            name: "ghcr-pull-secret",
+            namespace: namespace.metadata.name,
+          },
+          spec: {
+            refreshInterval: "1h",
+            secretStoreRef: {
+              name: args.externalSecrets.storeName || "pulumi-esc",
+              kind: "ClusterSecretStore",
+            },
+            target: {
+              name: "ghcr-pull-secret",
+              creationPolicy: "Owner",
+              template: {
+                type: "kubernetes.io/dockerconfigjson",
+                data: {
+                  ".dockerconfigjson":
+                    '{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}',
+                },
+              },
+            },
+            data: [
+              {
+                secretKey: "github_username",
+                remoteRef: {
+                  key: "github-username",
+                },
+              },
+              {
+                secretKey: "github_token",
+                remoteRef: {
+                  key: "github-token",
+                },
+              },
+            ],
+          },
+        },
+        { ...childOpts, dependsOn: [namespace, args.externalSecrets.operator] }
+      );
+    }
+
     // Optional: Create PVC for persistent storage
     if (args.storage) {
       this.pvc = new k8s.core.v1.PersistentVolumeClaim(

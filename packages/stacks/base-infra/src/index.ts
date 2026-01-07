@@ -32,53 +32,23 @@ export const pulumiStack = pulumi.getStack();
  * ExposedWebApp instances with infrastructure dependencies injected.
  */
 export function setupBaseInfra() {
-  // Auto-discover monorepo apps and create namespaces first
-  // This reads the packages/apps directory to find all monorepo apps
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const appsDir = path.join(__dirname, "../../../apps");
-
-  let appDirs: string[] = [];
-  const appNamespaces: Record<string, k8s.core.v1.Namespace> = {};
-
-  try {
-    if (fs.existsSync(appsDir)) {
-      appDirs = fs
-        .readdirSync(appsDir, { withFileTypes: true })
-        .filter((dirent: any) => dirent.isDirectory())
-        .map((dirent: any) => dirent.name);
-
-      pulumi.log.info(`Auto-discovered apps: ${appDirs.join(", ")}`);
-
-      // Create namespaces early for all discovered apps
-      // This ensures namespaces exist before GHCR pull secrets are created
-      for (const appName of appDirs) {
-        appNamespaces[appName] = new k8s.core.v1.Namespace(`${appName}-ns-early`, {
-          metadata: {
-            name: appName,
-            labels: {
-              app: appName,
-              "managed-by": "base-infra",
-              environment: pulumi.getStack(),
-              // Pod Security Standards enforcement (restricted)
-              "pod-security.kubernetes.io/enforce": "restricted",
-              "pod-security.kubernetes.io/audit": "restricted",
-              "pod-security.kubernetes.io/warn": "restricted",
-            },
-          },
-        });
-      }
-    }
-  } catch (error) {
-    pulumi.log.warn(`Could not read apps directory: ${error}`);
-  }
+  // DEPENDENCY CHAIN FOR BASE INFRASTRUCTURE:
+  // 1. Create core namespaces (cert-manager, ingress-nginx, external-secrets, cloudflare, longhorn)
+  // 2. Deploy Helm charts in those namespaces
+  // 3. Wait for external-secrets operator to be ready
+  // 4. Create ClusterSecretStore to sync secrets from Pulumi ESC
+  // 5. Create ClusterIssuer for TLS certificate management
+  // 6. Mark base infrastructure as ready
+  //
+  // APP DEPENDENCY CHAIN (handled in ExposedWebApp and per-app code):
+  // 1. Create app namespace (ExposedWebApp)
+  // 2. Create GHCR pull secret in app namespace (ExposedWebApp, if imagePullSecrets specified)
+  // 3. Create app Deployment with imagePullSecrets reference
 
   // Ensure all core infrastructure namespaces are created before proceeding.
   // Depend on the NAMESPACE RESOURCES (not Helm charts) to ensure they exist
   // before any resources try to deploy into them.
   // This prevents "namespace not found" errors during deployment.
-  // Note: Longhorn Helm release is explicitly exported from src/index.ts to ensure
-  // it's included in the deployment dependency graph
   const infrastructureReady = new k8s.core.v1.ConfigMap(
     "base-infra-ready",
     {
@@ -97,11 +67,14 @@ export function setupBaseInfra() {
         coreInfra.externalSecretsNamespace,
         coreInfra.cloudflaredNamespace,
         coreInfra.longhornNamespaceResource,
+        coreInfra.pulumiEscStore, // ClusterSecretStore must be ready
+        coreInfra.letsEncryptIssuer, // ClusterIssuer must be created
       ],
     }
   );
 
-  // Create HomelavContext for dependency injection
+  // Create HomelavContext for dependency injection into apps
+  // Apps will use this context to access infrastructure dependencies
   const homelabContext = new HomelabContext({
     cloudflare: {
       zoneId: baseInfraConfig.cloudflare.zoneId,
@@ -117,45 +90,7 @@ export function setupBaseInfra() {
     externalSecrets: {
       operator: coreInfra.externalSecretsOperator,
     },
-    namespaces: appNamespaces,
   });
-
-  // Create GHCR pull secret for private container images
-  // This creates ImagePullSecrets in all discovered monorepo app namespaces + default
-  // External apps can create their own using createGhcrImagePullSecret() helper
-  //
-  // CRITICAL ORDERING:
-  // 1. External Secrets Operator must be deployed
-  // 2. ClusterSecretStore (pulumiEscStore) must be created
-  // 3. Webhook must be ready
-  // 4. THEN we can create ExternalSecrets that reference the ClusterSecretStore
-  //
-  // If ExternalSecrets are created before ClusterSecretStore, they will fail
-  // with "ClusterSecretStore not found" error.
-  //
-  // SETUP REQUIRED: GitHub credentials must be configured in your Pulumi ESC:
-  // values:
-  //   github-username: your-github-username
-  //   github-token: your-github-token  # Mark as secret
-  const monorepoAppNamespaces = ["default", ...appDirs];
-  const ghcrPullSecret = coreInfra.createGhcrPullSecret(
-    {
-      externalSecretsOperator: coreInfra.externalSecretsOperator,
-      namespaces: monorepoAppNamespaces,
-    },
-    {
-      dependsOn: [
-        ...Object.values(appNamespaces),
-        coreInfra.pulumiEscStore, // CRITICAL: ClusterSecretStore must exist first
-        coreInfra.ensureWebhookReady(), // Ensures webhook pod is ready
-      ],
-    }
-  );
-
-  // Log GHCR setup instructions
-  pulumi.log.info(`GHCR Pull Secret: Created in namespaces [${monorepoAppNamespaces.join(", ")}]`);
-  pulumi.log.info(`To verify setup, run: kubectl get externalsecret ghcr-pull-secret -A`);
-  pulumi.log.info(`If secrets are pending, check config: pulumi config get homelab:githubToken`);
 
   // Export infrastructure details
   return {
@@ -167,10 +102,6 @@ export function setupBaseInfra() {
       externalSecrets: coreInfra.externalSecretsNamespace,
       cloudflared: coreInfra.cloudflaredNamespace,
       longhorn: coreInfra.longhornNamespaceResource,
-      // CRITICAL: Export auto-discovered app namespaces so Pulumi deploys them
-      // Without this export, the namespaces are created in code but Pulumi doesn't
-      // include them in the deployment, causing "namespace not found" errors
-      ...appNamespaces,
     },
     storage: {
       longhorn: coreInfra.longhorn, // Export Longhorn Helm release to ensure it's deployed
@@ -189,9 +120,7 @@ export function setupBaseInfra() {
     },
     externalSecrets: {
       externalSecretsOperator: coreInfra.externalSecretsOperator,
-    },
-    registrySecrets: {
-      ghcrPullSecret: ghcrPullSecret,
+      clusterSecretStore: coreInfra.pulumiEscStore,
     },
   };
 }
