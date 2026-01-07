@@ -124,23 +124,19 @@ export function setupBaseInfra() {
   // This creates ImagePullSecrets in all discovered monorepo app namespaces + default
   // External apps can create their own using createGhcrImagePullSecret() helper
   //
-  // IMPORTANT: We ensure the external-secrets webhook is ready before trying to create
-  // ExternalSecret resources. This prevents "no endpoints available for service" errors
-  // during webhook validation.
+  // CRITICAL ORDERING:
+  // 1. External Secrets Operator must be deployed
+  // 2. ClusterSecretStore (pulumiEscStore) must be created
+  // 3. Webhook must be ready
+  // 4. THEN we can create ExternalSecrets that reference the ClusterSecretStore
   //
-  // SETUP REQUIRED: GitHub credentials must be configured in your stack config:
-  // 1. Create a GitHub Personal Access Token with read:packages scope
-  // 2. Set it in your Pulumi stack:
-  //    pulumi config set --secret homelab:githubToken "ghp_xxxx"
-  //    pulumi config set homelab:githubUsername "your-username"
-  // 3. Or update your Pulumi ESC environment with:
-  //    values:
-  //      github-username: your-username
-  //      github-token: your-token  # Mark as secret
+  // If ExternalSecrets are created before ClusterSecretStore, they will fail
+  // with "ClusterSecretStore not found" error.
   //
-  // To verify the secret was synced:
-  //   kubectl get externalsecret ghcr-pull-secret -n <namespace>
-  //   kubectl describe externalsecret ghcr-pull-secret -n <namespace>
+  // SETUP REQUIRED: GitHub credentials must be configured in your Pulumi ESC:
+  // values:
+  //   github-username: your-github-username
+  //   github-token: your-github-token  # Mark as secret
   const monorepoAppNamespaces = ["default", ...appDirs];
   const ghcrPullSecret = coreInfra.createGhcrPullSecret(
     {
@@ -150,6 +146,7 @@ export function setupBaseInfra() {
     {
       dependsOn: [
         ...Object.values(appNamespaces),
+        coreInfra.pulumiEscStore, // CRITICAL: ClusterSecretStore must exist first
         coreInfra.ensureWebhookReady(), // Ensures webhook pod is ready
       ],
     }
