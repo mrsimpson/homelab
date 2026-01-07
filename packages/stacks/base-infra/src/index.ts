@@ -123,8 +123,10 @@ export function setupBaseInfra() {
   // Create GHCR pull secret for private container images
   // This creates ImagePullSecrets in all discovered monorepo app namespaces + default
   // External apps can create their own using createGhcrImagePullSecret() helper
-  // Must depend on ALL infrastructure to be ready (via the marker resource)
-  // This ensures namespaces, CRDs, and webhooks are all available
+  //
+  // IMPORTANT: We ensure the external-secrets webhook is ready before trying to create
+  // ExternalSecret resources. This prevents "no endpoints available for service" errors
+  // during webhook validation.
   const monorepoAppNamespaces = ["default", ...appDirs];
   const ghcrPullSecret = coreInfra.createGhcrPullSecret(
     {
@@ -132,7 +134,10 @@ export function setupBaseInfra() {
       namespaces: monorepoAppNamespaces,
     },
     {
-      dependsOn: [...Object.values(appNamespaces), infrastructureReady],
+      dependsOn: [
+        ...Object.values(appNamespaces),
+        coreInfra.ensureWebhookReady(), // Ensures webhook pod is ready
+      ],
     }
   );
 
