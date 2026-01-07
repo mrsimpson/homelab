@@ -48,11 +48,46 @@ export const cloudflaredNamespace = new k8s.core.v1.Namespace("cloudflare", {
   },
 });
 
+// Create a Service alias for ingress-nginx controller
+// This solves the problem of Helm generating dynamic service names
+// We create a simple Service that selects the ingress-nginx controller pods
+// and expose it as a predictable name that cloudflared can reference
+const ingressNginxAlias = new k8s.core.v1.Service(
+  "ingress-nginx-controller",
+  {
+    metadata: {
+      name: "ingress-nginx-controller",
+      namespace: "ingress-nginx",
+    },
+    spec: {
+      selector: {
+        "app.kubernetes.io/name": "ingress-nginx",
+        "app.kubernetes.io/component": "controller",
+      },
+      ports: [
+        {
+          name: "http",
+          port: 80,
+          targetPort: 80,
+          protocol: "TCP",
+        },
+        {
+          name: "https",
+          port: 443,
+          targetPort: 443,
+          protocol: "TCP",
+        },
+      ],
+      type: "ClusterIP",
+    },
+  },
+  {
+    dependsOn: [ingressNginx],
+  }
+);
+
 // Create tunnel configuration
-// This routes all traffic to the ingress-nginx controller
-// NOTE: We depend on ingressNginx to ensure the service exists,
-// but we use a selector-based approach in the cloudflared deployment
-// to find the actual service regardless of the Helm-generated name
+// This routes all traffic to the ingress-nginx controller via our alias service
 const tunnelConfig = new k8s.core.v1.ConfigMap(
   "tunnel-config",
   {
@@ -72,7 +107,7 @@ ingress:
     },
   },
   {
-    dependsOn: [cloudflaredNamespace, ingressNginx], // CRITICAL: Explicit dependency on ingress-nginx
+    dependsOn: [cloudflaredNamespace, ingressNginxAlias], // Depend on the alias service
   }
 );
 

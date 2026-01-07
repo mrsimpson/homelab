@@ -62,7 +62,7 @@ export const nodejsDemoUrl = nodejsDemoApp.url;
 // Storage validator - simple nginx-based storage test with automatic R2 backups
 export const storageValidatorApp = homelab.createExposedWebApp("storage-validator", {
   image: "nginxinc/nginx-unprivileged:alpine",
-  domain: "storage-validator.local.mrsimpson.dev",
+  domain: "storage-validator.no-panic.org",
   port: 8080,
   storage: {
     size: "1Gi",
@@ -71,7 +71,7 @@ export const storageValidatorApp = homelab.createExposedWebApp("storage-validato
   },
   tags: ["storage", "validation", "persistent", "longhorn", "backup"],
 });
-export const storageValidatorUrl = "https://storage-validator.local.mrsimpson.dev";
+export const storageValidatorUrl = "https://storage-validator.no-panic.org";
 
 // Longhorn UI - Management interface for storage system
 // Note: Using portforwarding instead of Ingress to avoid webhook validation race conditions
