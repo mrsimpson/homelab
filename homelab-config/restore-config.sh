@@ -2,15 +2,14 @@
 set -e
 
 # Restore Pulumi config from encrypted backup
-# No Python dependency - pure bash implementation
+# Pure bash with simple YAML parsing
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/pulumi-config.enc.yaml"
 SOPS="$(which sops)"
 TEMP_CONFIG=$(mktemp)
 TEMP_KEY=$(mktemp)
-TEMP_ESC=$(mktemp)
-trap "rm -f $TEMP_CONFIG $TEMP_KEY $TEMP_ESC $TEMP_ESC.yaml" EXIT
+trap "rm -f $TEMP_CONFIG $TEMP_KEY" EXIT
 
 STACK_NAME="${1:-.}"
 
@@ -56,67 +55,105 @@ echo "Decrypting configuration..."
 
 echo "Restoring configuration to Pulumi..."
 
-sed -n '/^config:/,/^esc_environments:/p' "$TEMP_CONFIG" | grep -v "^config:" | grep -v "^esc_environments:" | \
-while IFS= read -r line; do
-    [[ -z "$line" || "$line" =~ ^[[:space:]]{6} ]] && continue
+# Parse config with simple approach
+sed -n '/^config:/,/^esc_environments:/p' "$TEMP_CONFIG" | \
+grep -E "^    [a-zA-Z]|^        (secret|value):" | \
+awk '
+/^    [a-zA-Z]/ {
+    if (key != "") {
+        print key "|" secret "|" value
+    }
+    key = $1
+    gsub(/:$/, "", key)
+    secret = ""
+    value = ""
+    next
+}
+/secret:/ {
+    secret = $2
+}
+/value:/ {
+    value = substr($0, index($0, $2))
+    gsub(/^['\''"]/, "", value)
+    gsub(/['\''"]$/, "", value)
+}
+END {
+    if (key != "") {
+        print key "|" secret "|" value
+    }
+}
+' | while IFS='|' read -r key secret_val value_val; do
+    [ -z "$key" ] && continue
     
-    if [[ "$line" =~ ^[[:space:]]{2}([a-zA-Z0-9:_-]+): ]]; then
-        key="${BASH_REMATCH[1]}"
-        
-        is_secret=$(sed -n "/^  $key:/,/^  [a-z]/p" "$TEMP_CONFIG" | grep "secret:" | grep -c "true" || echo 0)
-        value=$(sed -n "/^  $key:/,/^  [a-z]/p" "$TEMP_CONFIG" | grep "value:" | sed "s/.*value:[[:space:]]*//; s/['\"]//g" | head -1)
-        
-        if [ -v "OVERRIDE_SECRETS[$key]" ]; then
-            value="${OVERRIDE_SECRETS[$key]}"
-        fi
-        
-        if [ "$is_secret" == "1" ] && [ -z "$value" ]; then
-            echo "[WARN] Skipping secret: $key"
-            continue
-        fi
-        
-        [ -z "$value" ] && continue
-        
-        if [ "$is_secret" == "1" ]; then
-            pulumi config set --secret "$key" "$value" --stack "$STACK_NAME" 2>/dev/null && echo "[OK]   $key" || echo "[FAIL] $key"
+    if [ -v "OVERRIDE_SECRETS[$key]" ]; then
+        value_val="${OVERRIDE_SECRETS[$key]}"
+    fi
+    
+    [ -z "$value_val" ] && continue
+    
+    is_secret=0
+    [ "$secret_val" == "true" ] && is_secret=1
+    
+    if [ "$is_secret" == "1" ] && [ -z "$value_val" ]; then
+        echo "[WARN] Skipping secret (empty): $key"
+        continue
+    fi
+    
+    if [ "$is_secret" == "1" ]; then
+        if pulumi config set --secret "$key" "$value_val" --stack "$STACK_NAME" 2>/dev/null; then
+            echo "[OK]   $key"
         else
-            pulumi config set "$key" "$value" --stack "$STACK_NAME" 2>/dev/null && echo "[OK]   $key" || echo "[FAIL] $key"
+            echo "[FAIL] $key"
+        fi
+    else
+        if pulumi config set "$key" "$value_val" --stack "$STACK_NAME" 2>/dev/null; then
+            echo "[OK]   $key"
+        else
+            echo "[FAIL] $key"
         fi
     fi
 done
 
+# Handle ESC environments - much simpler approach
 echo ""
 echo "--- Restoring ESC Environments ---"
 
-if grep -q "^esc_environments:" "$TEMP_CONFIG"; then
-    sed -n '/^esc_environments:/,$p' "$TEMP_CONFIG" | grep "^    [a-zA-Z0-9_-]*:" | while IFS= read -r env_line; do
-        env_key=$(echo "$env_line" | sed 's/^[[:space:]]*//; s/:.*//')
-        
-        env_name=$(sed -n "/^    $env_key:/,/^    [a-zA-Z]/p" "$TEMP_CONFIG" | \
-                   grep "name:" | head -1 | sed "s/.*name:[[:space:]]*//; s/['\"]//g")
-        
-        if [ -z "$env_name" ]; then
-            continue
+# Extract environment names
+sed -n '/^esc_environments:/,$p' "$TEMP_CONFIG" | grep "^    [a-zA-Z0-9_]*:$" | while read -r env_line; do
+    env_key=$(echo "$env_line" | sed 's/:$//')
+    
+    # Get environment name  
+    env_name=$(sed -n "/^    $env_key:/,/^    [a-zA-Z]/p" "$TEMP_CONFIG" | grep "name: " | sed 's/.*name: //; s/['\''"]//g' | head -1)
+    
+    [ -z "$env_name" ] && continue
+    
+    # Create ESC YAML file - extract everything under "values:" and reformat
+    TEMP_ESC=$(mktemp)
+    {
+        echo "values:"
+        # Find the values section and extract with proper indentation
+        sed -n "/^    $env_key:/,/^    [a-zA-Z]/p" "$TEMP_CONFIG" | \
+            sed -n '/^        values:/,/^        [a-z]/p' | \
+            tail -n +2 | \
+            sed 's/^        /  /'
+    } > "$TEMP_ESC"
+    
+    # Restore if has content
+    if [ -s "$TEMP_ESC" ] && grep -q "[a-zA-Z]" "$TEMP_ESC"; then
+        if pulumi env edit "$env_name" --file "$TEMP_ESC" 2>/dev/null; then
+            echo "[OK]   ESC: $env_name"
+        else
+            echo "[FAIL] ESC: $env_name"
         fi
-        
-        {
-            echo "values:"
-            sed -n "/^    $env_key:/,/^    [a-zA-Z]/p" "$TEMP_CONFIG" | \
-                sed -n '/^        values:/,/^        [a-z]/p' | \
-                tail -n +2 | tail -1 | \
-                sed 's/^        /  /'
-        } > "$TEMP_ESC.yaml"
-        
-        if grep -q "[a-zA-Z]" "$TEMP_ESC.yaml"; then
-            pulumi env edit "$env_name" --file "$TEMP_ESC.yaml" 2>/dev/null && \
-                echo "[OK]   ESC: $env_name" || echo "[FAIL] ESC: $env_name"
-        fi
-        
-        rm -f "$TEMP_ESC.yaml"
-    done
-fi
+    else
+        echo "[WARN] ESC environment empty: $env_name"
+    fi
+    
+    rm -f "$TEMP_ESC"
+done
 
 echo ""
 echo "======================================"
 echo "Restore Complete!"
 echo "======================================"
+echo ""
