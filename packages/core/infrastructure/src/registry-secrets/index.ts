@@ -27,19 +27,50 @@ export interface RegistrySecretsArgs {
 /**
  * Creates GHCR (GitHub Container Registry) pull secret via External Secrets Operator
  *
- * Prerequisites:
- * 1. Create a GitHub Personal Access Token with `read:packages` scope
- * 2. Store credentials in Pulumi ESC:
- *    - Key: github-credentials/username
- *    - Key: github-credentials/token (secret)
+ * This function creates an ExternalSecret that pulls GitHub credentials from Pulumi ESC
+ * and creates a dockerconfigjson secret for pulling private GHCR images.
+ *
+ * IMPORTANT: Before using this function, you MUST configure your GitHub credentials
+ * in your Pulumi ESC environment with these keys:
+ *
+ * For Pulumi ESC environment (recommended):
+ *   1. Create a GitHub Personal Access Token (PAT) with `read:packages` scope:
+ *      - Go to https://github.com/settings/tokens/new
+ *      - Select scopes: "read:packages" minimum
+ *      - Generate and copy the token
+ *
+ *   2. Create/update your Pulumi ESC environment with:
+ *      ```yaml
+ *      values:
+ *        github-username: your-github-username
+ *        github-token: your-github-token  # Mark as secret
+ *      ```
+ *
+ *   3. Alternatively, use pulumi config set:
+ *      ```bash
+ *      pulumi config set --secret github-token "your-token"
+ *      pulumi config set github-username "your-username"
+ *      ```
+ *
+ * The ExternalSecret will then automatically:
+ * - Fetch credentials from Pulumi ESC
+ * - Create a Kubernetes secret in each target namespace
+ * - Automatically refresh credentials every 1 hour
+ * - Encode credentials as base64 for dockerconfigjson format
  *
  * Usage:
  *   const ghcrSecret = createGhcrPullSecret({
  *     externalSecretsOperator: externalSecretsOperator,
+ *     namespaces: ["nodejs-demo", "app-namespace"],
  *   });
  *
  *   // Then in ExposedWebApp:
  *   imagePullSecrets: [{ name: "ghcr-pull-secret" }]
+ *
+ * If credentials are not configured, the ExternalSecret will remain pending
+ * and pods using the pull secret will fail with ImagePullBackOff errors.
+ * Check the ExternalSecret status with:
+ *   kubectl describe externalsecret ghcr-pull-secret -n <namespace>
  */
 export function createGhcrPullSecret(args: RegistrySecretsArgs, opts?: pulumi.ResourceOptions) {
   const storeName = args.storeName || "pulumi-esc";

@@ -401,6 +401,20 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       });
     }
 
+    // Build Deployment dependencies
+    // If imagePullSecrets are specified, the pod may depend on those secrets existing.
+    // However, ExternalSecrets may take time to sync, so we add a small wait by depending
+    // on the external-secrets operator if it's available.
+    const deploymentDeps: pulumi.Resource[] = [namespace];
+    if (
+      args.externalSecrets?.operator &&
+      args.imagePullSecrets &&
+      args.imagePullSecrets.length > 0
+    ) {
+      // If using external secrets and image pull secrets, ensure the operator is ready
+      deploymentDeps.push(args.externalSecrets.operator);
+    }
+
     // Create Deployment
     this.deployment = new k8s.apps.v1.Deployment(
       `${name}-deployment`,
@@ -440,7 +454,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           },
         },
       },
-      { ...childOpts, dependsOn: [namespace] }
+      { ...childOpts, dependsOn: deploymentDeps }
     );
 
     // Determine service target port (OAuth proxy if enabled, else app port)
