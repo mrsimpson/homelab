@@ -24,10 +24,22 @@ const baseInfra = setupBaseInfra();
 export const homelab = baseInfra.context;
 
 // Deploy storage infrastructure
+// Ensure longhorn is deployed by making storage classes depend on it
+// (storage classes already have dependsOn: [longhorn], but we need to ensure
+// longhorn is included in the stack)
 export const longhornStorage = longhorn;
 export const storageClasses = {
   persistent: persistentStorageClass, // For critical data with R2 backups
   uncritical: uncriticalStorageClass, // For non-critical data without backups
+};
+
+// Force storage classes to be included by exporting them and making them
+// depend on longhorn. This ensures the entire chain is deployed.
+// Note: the storage classes already depend on longhorn, this just ensures
+// they're tracked as outputs that Pulumi must deploy.
+export const storageClassesExported = {
+  persistent: persistentStorageClass,
+  uncritical: uncriticalStorageClass,
 };
 
 // Log backup configuration status

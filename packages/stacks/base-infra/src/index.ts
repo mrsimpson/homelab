@@ -77,6 +77,8 @@ export function setupBaseInfra() {
   // Depend on the NAMESPACE RESOURCES (not Helm charts) to ensure they exist
   // before any resources try to deploy into them.
   // This prevents "namespace not found" errors during deployment.
+  // Note: Longhorn Helm release is explicitly exported from src/index.ts to ensure
+  // it's included in the deployment dependency graph
   const infrastructureReady = new k8s.core.v1.ConfigMap(
     "base-infra-ready",
     {
@@ -144,6 +146,9 @@ export function setupBaseInfra() {
       externalSecrets: coreInfra.externalSecretsNamespace,
       cloudflared: coreInfra.cloudflaredNamespace,
       longhorn: coreInfra.longhornNamespaceResource,
+    },
+    storage: {
+      longhorn: coreInfra.longhorn, // Export Longhorn Helm release to ensure it's deployed
     },
     cloudflare: {
       tunnel: coreInfra.tunnel,
