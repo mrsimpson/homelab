@@ -24,23 +24,25 @@ const baseInfra = setupBaseInfra();
 export const homelab = baseInfra.context;
 
 // Deploy storage infrastructure
-// Ensure longhorn is deployed by making storage classes depend on it
-// (storage classes already have dependsOn: [longhorn], but we need to ensure
-// longhorn is included in the stack)
+// CRITICAL: Export Longhorn Helm release directly so Pulumi tracks it
+// Without this, Longhorn may not be deployed even though storage classes depend on it
 export const longhornStorage = longhorn;
+
+// Export storage classes - they depend on longhorn Helm release
+// This establishes the dependency chain: these classes depend on longhorn
 export const storageClasses = {
   persistent: persistentStorageClass, // For critical data with R2 backups
   uncritical: uncriticalStorageClass, // For non-critical data without backups
 };
 
-// Force storage classes to be included by exporting them and making them
-// depend on longhorn. This ensures the entire chain is deployed.
-// Note: the storage classes already depend on longhorn, this just ensures
-// they're tracked as outputs that Pulumi must deploy.
-export const storageClassesExported = {
-  persistent: persistentStorageClass,
-  uncritical: uncriticalStorageClass,
-};
+// Verify storage classes were created (helps ensure longhorn is deployed)
+pulumi
+  .all([persistentStorageClass.metadata.name, uncriticalStorageClass.metadata.name])
+  .apply(([persistentName, uncriticalName]) => {
+    pulumi.log.info(
+      `Storage classes exported: persistent=${persistentName}, uncritical=${uncriticalName}`
+    );
+  });
 
 // Log backup configuration status
 logBackupStatus();
