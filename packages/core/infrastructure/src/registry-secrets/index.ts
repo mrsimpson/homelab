@@ -107,7 +107,8 @@ export function createGhcrPullSecret(args: RegistrySecretsArgs, opts?: pulumi.Re
               template: {
                 type: "kubernetes.io/dockerconfigjson",
                 data: {
-                  ".dockerconfigjson": pulumi.interpolate`{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
+                  ".dockerconfigjson":
+                    '{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}',
                 },
               },
             },
@@ -182,15 +183,15 @@ export function createDockerHubPullSecret(
               template: {
                 type: "kubernetes.io/dockerconfigjson",
                 data: {
-                  ".dockerconfigjson": pulumi.interpolate`{
-  "auths": {
-    "https://index.docker.io/v1/": {
-      "username": "{{ .dockerhub_username }}",
-      "password": "{{ .dockerhub_token }}",
-      "auth": "{{ printf "%s:%s" .dockerhub_username .dockerhub_token | b64enc }}"
-    }
-  }
-}`,
+                  ".dockerconfigjson": `{
+   "auths": {
+     "https://index.docker.io/v1/": {
+       "username": "{{ .dockerhub_username }}",
+       "password": "{{ .dockerhub_token }}",
+       "auth": "{{ printf "%s:%s" .dockerhub_username .dockerhub_token | b64enc }}"
+     }
+   }
+ }`,
                 },
               },
             },
