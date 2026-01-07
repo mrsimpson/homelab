@@ -38,6 +38,9 @@ export const ingressNginx = new k8s.helm.v3.Release(
       controller: {
         // Use hostNetwork since k3s doesn't have LoadBalancer by default
         hostNetwork: true,
+        // When using hostNetwork, we need ClusterFirstWithHostNet to properly resolve cluster DNS
+        // This allows the pod to resolve internal service FQDNs like authelia.authelia.svc.cluster.local
+        dnsPolicy: "ClusterFirstWithHostNet",
         hostPort: {
           enabled: true,
           ports: {
@@ -51,6 +54,25 @@ export const ingressNginx = new k8s.helm.v3.Release(
         // Set ingressClass as default
         ingressClassResource: {
           default: true,
+        },
+        // CRITICAL: Use Recreate strategy instead of RollingUpdate
+        // Reason: hostPort (80, 443) binding prevents multiple replicas on same node
+        // RollingUpdate tries to create new pod before deleting old one, causing port conflicts
+        // Recreate deletes old pod first, then creates new one (acceptable for single-node homelab)
+        strategy: {
+          type: "Recreate",
+        },
+        // Configuration for all ingresses
+        config: {
+          // Trust X-Forwarded-* headers from Cloudflare tunnel and reverse proxies
+          // This tells nginx that the X-Forwarded-Proto, X-Forwarded-For, X-Forwarded-Host headers
+          // from Cloudflare tunnel are trustworthy and should be used for backend communication
+          "use-forwarded-headers": "true",
+          "compute-full-forwarded-for": "true",
+          "use-proxy-protocol": "false",
+          // Enable configuration snippets for ingress annotations
+          // Required to pass correct X-Forwarded-Proto to auth endpoints
+          "allow-snippet-annotations": "true",
         },
       },
       // Webhook configuration - use failurePolicy: Ignore to prevent validation

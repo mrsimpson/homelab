@@ -12,6 +12,21 @@ import * as pulumi from "@pulumi/pulumi";
  * - And 40+ more backends
  *
  * See ADR 008 for architecture decisions and migration path.
+ *
+ * WEBHOOK READINESS REQUIREMENT:
+ * The external-secrets-webhook deployment must be ready before creating resources
+ * that require webhook validation (ExternalSecrets, SecretStores).
+ *
+ * When the External Secrets Helm chart deploys:
+ * 1. ValidatingWebhookConfiguration is created immediately
+ * 2. Webhook pod starts but takes time to become ready (image pull, TLS setup)
+ * 3. If ExternalSecrets are created before webhook is ready, validation fails with
+ *    "no endpoints available for service" error
+ *
+ * SOLUTION:
+ * Wrap ExternalSecret creation in a resource that explicitly depends on the
+ * webhook deployment being ready. This ensures Pulumi waits for the webhook
+ * pod readiness check to pass before attempting to create validation resources.
  */
 
 const config = new pulumi.Config();
@@ -76,6 +91,22 @@ export const externalSecretsOperator = new k8s.helm.v3.Release(
   },
   { dependsOn: [externalSecretsNamespace] } // CRITICAL: Explicit dependency on namespace resource
 );
+
+/**
+ * Helper: Waits for the external-secrets webhook to be ready.
+ *
+ * The webhook pod must be running and serving requests before we can create
+ * resources that require webhook validation (ExternalSecrets, SecretStores).
+ *
+ * This works by depending on the Helm Release itself. Since the Helm chart
+ * includes the webhook pod definition with readiness probes, the Release
+ * deployment ensures the webhook pod is ready before returning.
+ */
+export function ensureWebhookReady(): pulumi.Resource {
+  // Return the external-secrets operator resource as a dependency marker
+  // Anything depending on this will wait for the webhook pod to be ready
+  return externalSecretsOperator;
+}
 
 // Create Pulumi API token secret for ESO to access Pulumi ESC
 // This token allows ESO to read secrets from Pulumi Cloud/ESC

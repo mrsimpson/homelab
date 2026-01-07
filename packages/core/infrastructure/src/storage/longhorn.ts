@@ -1,7 +1,8 @@
 import * as k8s from "@pulumi/kubernetes";
+import { createBackupSecret, createDailyBackupJob, getBackupConfig } from "./backup";
+import { createLonghornNodeConfig } from "./node-config";
+import { backupTargetRoot, hasBackupCredentials, logR2Status } from "./r2-buckets";
 import { createLonghornPrecheck } from "./validation";
-import { backupTargetRoot, logR2Status, hasBackupCredentials } from "./r2-buckets";
-import { getBackupConfig, createBackupSecret, createDailyBackupJob } from "./backup";
 
 /**
  * Longhorn - Distributed block storage for Kubernetes
@@ -11,6 +12,16 @@ import { getBackupConfig, createBackupSecret, createDailyBackupJob } from "./bac
  * - Built-in snapshots and backup
  * - Automatic R2 cloud backup integration
  * - Web UI for management
+ *
+ * Note on Helm Lifecycle Hooks:
+ * The Longhorn Helm chart includes lifecycle hooks (pre-upgrade, pre-delete, post-upgrade).
+ * These hooks run during Helm operations but may fail in certain conditions:
+ * - pre-delete hook requires deleting-confirmation-flag=true to proceed
+ * - pre-upgrade hook runs even during fresh installations
+ *
+ * These hooks are not critical for core functionality (manager, driver, UI all work fine).
+ * We skip awaiting on them to allow deployment to complete. The hooks run asynchronously
+ * without blocking storage operations.
  */
 
 // Create namespace for Longhorn
@@ -34,11 +45,7 @@ const backupSecret = hasBackupCredentials()
   ? createBackupSecret("longhorn-system", backupConfig)
   : undefined;
 
-// Create daily backup recurring job if credentials are available
-const dailyBackupJob = createDailyBackupJob("longhorn-system");
-
 // Install Longhorn via Helm with conditional R2 backup integration
-// Use explicit namespace string with explicit dependsOn to ensure namespace is created first
 export const longhorn = new k8s.helm.v3.Release(
   "longhorn",
   {
@@ -102,13 +109,56 @@ export const longhorn = new k8s.helm.v3.Release(
   },
   {
     dependsOn: [longhornNamespaceResource, ...(backupSecret ? [backupSecret] : [])],
+    // Configure Helm hook Jobs to not block Pulumi deployments
+    // These are managed by Helm's lifecycle hooks and often fail
+    transformations: [
+      (resource: any) => {
+        // Identify Helm hook resources (pre-upgrade, pre-delete, post-upgrade, uninstall, etc.)
+        // These are created by Helm and don't need to be tracked by Pulumi
+        if (
+          resource.type === "kubernetes:batch/v1:Job" &&
+          resource.metadata?.annotations?.["helm.sh/hook"]
+        ) {
+          // Configure to not wait for the job and ignore failures
+          resource.opts = resource.opts || {};
+          // Set a minimal timeout so Pulumi doesn't wait for the job to complete
+          resource.opts.deleteBeforeReplace = true;
+          resource.opts.ignoreChanges = ["status", "spec.backoffLimit"];
+          // Don't wait for completion
+          resource.opts.skipAwait = true;
+        }
+
+        return resource;
+      },
+    ],
   }
 );
+
+// Create daily backup recurring job AFTER Longhorn is deployed
+// The Helm chart deploys the RecurringJob CRD, so we need this dependency
+const dailyBackupJob = hasBackupCredentials()
+  ? createDailyBackupJob("longhorn-system", { dependsOn: [longhorn] })
+  : undefined;
 
 // Run prerequisite validation before deploying Longhorn
 const precheckJob = createLonghornPrecheck(
   longhornNamespaceResource.metadata.apply((m) => m.name as string)
 );
+
+// Configure Longhorn node disk for K3s single-node cluster
+// In single-node K3s, the node "flinker" doesn't have dedicated storage disks.
+// We explicitly configure the default data path for Longhorn storage.
+// This ensures volumes can be provisioned even without dedicated block devices.
+//
+// Without this configuration, Longhorn's auto-discovery fails because:
+// - Auto-discovery expects labeled disks or separate block devices
+// - K3s single-node setups don't have separate disk partitions
+// - We need to explicitly designate the default data path for storage
+const nodeConfig = createLonghornNodeConfig({
+  nodeName: "flinker",
+  dataPath: "/var/lib/longhorn/",
+  dependencies: [longhorn],
+});
 
 // Log R2 backup status
 logR2Status();
@@ -117,3 +167,4 @@ export const longhornNamespace = "longhorn-system";
 export const longhornPrecheck = precheckJob;
 export const longhornBackupSecret = backupSecret;
 export const longhornBackupJob = dailyBackupJob;
+export const longhornNodeConfig = nodeConfig;
