@@ -167,6 +167,10 @@ export function setupBaseInfra() {
       externalSecrets: coreInfra.externalSecretsNamespace,
       cloudflared: coreInfra.cloudflaredNamespace,
       longhorn: coreInfra.longhornNamespaceResource,
+      // CRITICAL: Export auto-discovered app namespaces so Pulumi deploys them
+      // Without this export, the namespaces are created in code but Pulumi doesn't
+      // include them in the deployment, causing "namespace not found" errors
+      ...appNamespaces,
     },
     storage: {
       longhorn: coreInfra.longhorn, // Export Longhorn Helm release to ensure it's deployed
