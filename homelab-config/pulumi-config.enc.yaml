@@ -8,16 +8,10 @@ config:
     cloudflare:apiToken:
         secret: ENC[AES256_GCM,data:aJAVhA==,iv:3WI4+XdppaqJDIMyD6Wvs9HCOcbJwhZTzlcRzo1MbPE=,tag:WLIuvg7r0yuLNhQ3vo36bg==,type:bool]
         value: ENC[AES256_GCM,data:NLKQJVeY9LBXduzJu9J+B9BI+VMI7QUodnlSj4PKXLuqvzrlljbrmw==,iv:TMQtouo2WViV8rREnomGYLwmcAt9dNKBvKUtCV7VCkg=,tag:rLb943mgJL7KEAqt+MEdNg==,type:str]
-    container-registry:domain:
-        value: ENC[AES256_GCM,data:kleKKPu2eK4/aKHD4bu+tsn1BbZa,iv:d8pSS4hqtcDD5nGXp8P0nNdQ2obH3mD1TZVLD0sexxM=,tag:73h0fUPkx3kpxChD2yVGBA==,type:str]
-    container-registry:username:
-        value: ENC[AES256_GCM,data:WUVaN+Y=,iv:3lYCpn82eVQzNgjmxN8aWtll7l/0+cdod5XlslY0BeM=,tag:jsp8JjeVUwJHZcOPXOWwVA==,type:str]
     homelab:cloudflareAccountId:
         value: ENC[AES256_GCM,data:0ygaB4BgMn/NDTW1oVR+53PHePhRQHdZ/Drx2/GizO8=,iv:BQQ7CCE5vnDa2OAOu2+pm12gUcSjEeP2dD//kb/f038=,tag:lC942vVdCS5pMo0OBuTqkQ==,type:str]
     homelab:cloudflareZoneId:
         value: ENC[AES256_GCM,data:6d6HIDvAZIS+KgM80TFuBrIg1PJLWVkVyyxzwNQZ6lA=,iv:KX8mQ6PDlgxXqUYR5ZH2c8tjbh11v4okS/+2SYvpkXo=,tag:nG4gXanTF8lGewKqD4En6Q==,type:str]
-    homelab:container-registry:
-        value: ENC[AES256_GCM,data:rhuCJ5bNoisdoWTQ00titMR4KzE3ObWMpc7PER6A9ktZL1vmBtw7S6E=,iv:v5LmiAiU3JUfQOzbtLgtMyA/7xZY2Am+IntretKKv5s=,tag:xxoLJlBR2rGRP/GYjwJNaA==,type:str]
     homelab:domain:
         value: ENC[AES256_GCM,data:FpamyRRwdcce5SAh,iv:Yafj6PdD8QNCC6X92vAWrjba5fE4SLEtIv124nHbP8w=,tag:gDmkirb2JFVuMRv1izgcsw==,type:str]
     homelab:email:
@@ -27,8 +21,6 @@ config:
         value: ENC[AES256_GCM,data:vdp2Bjx8EXbh9tRAOCOAlPJLYSO890QRfRTDVCB5zzAIImsngtCzybTxa0k=,iv:6AGXWwAhf4gcgD6TQuc4iqag6YV+hqdpFpdGHtMtX0U=,tag:jnmA0GCZwfrnPyvWUa1DSg==,type:str]
     homelab:pulumiOrganization:
         value: ENC[AES256_GCM,data:wg1F/pDWz7h/,iv:SCL4hQKro1TJ9s7NTZKBVFe9GnYCkmW+xfdFaT66fHs=,tag:p/Zd+uWxW0W8XMVzS0/iEA==,type:str]
-    homelab:skipClusterIssuer:
-        value: ENC[AES256_GCM,data:0Vih7A==,iv:4hCj1+Uo3rrX3qDJv3Fzb4I/jM2zBSyAbeS8+kd0WHw=,tag:B+zKfksnc/3WMEY2EABEiA==,type:str]
     longhorn:backupAccessKeyId:
         secret: ENC[AES256_GCM,data:yfgIYg==,iv:FbiD2X9/TmV4v1pNknXdhEux79q8f23DVPgN016KSSc=,tag:NMHpEdDnBzP6SN9HoynP2Q==,type:bool]
         value: ENC[AES256_GCM,data:/W73w7qsQZSL9m2cvE7/D6+zP7I3zndd+PaA7xQLZOg=,iv:yiODEW4+ENK8DrmRr74mTdvH+LAPtqt2+QcaXDGC/9M=,tag:AKwDzK8B0E8dXcvoJ3OHAg==,type:str]
@@ -55,7 +47,7 @@ sops:
             N2wzYXR4WHdrMkF0bTlzTEh6c3hPdkEKmBrxh78MMElKWuZnNu8Cmlv0toVkNloM
             XGtUro11yeakfg/2T+POO3oH3T1LBA2gq0ghwhJrWlLDadpWThuvrg==
             -----END AGE ENCRYPTED FILE-----
-    lastmodified: "2025-12-30T23:12:55Z"
-    mac: ENC[AES256_GCM,data:r/pPwakMtFqE623PFnJWii6N57BSchZqwJu0O8nNQtDSMhdriy6wr4S4MNGaw1Xtya+Ktppo8F3mPJ9Dnb0vwn8HrbBQSwwJiOt6/tSpItKcLs1dlnypB8gxZXCsBNH5g99g7uJWZYdZCJ2ZsD+iaT2LtY/mPz1w1nl0fPuT5dM=,iv:p3qHW7fIoFj+fP2UylWD1LrzsveTKTqtYQB+BWLBDKw=,tag:zW2Utk5iuhzF3Yj8/ibqnw==,type:str]
+    lastmodified: "2026-01-07T14:25:33Z"
+    mac: ENC[AES256_GCM,data:BMMHRPZ69Fdkjs6N/GrJ/2FeHf29I6XTriQrpupzCs6FOvnMt3Sv5Lf2UxslcJoCJjG8IQ8lhLbAyhERHB+jsD6eaHCIIV5pCS9eQWJm2uN2W9+PWwqT4fb1ESRC26Q11/Z/vGPsBuQ1nV16vV1BXl5SsOxggo+Yr+yvlvQ2ncs=,iv:unYHbo9EBly1gMhoKbmBYSRxwwFV9c1F941brA3dnQ0=,tag:2SggkpHoEjfkhCW2m9kVtw==,type:str]
     unencrypted_suffix: _unencrypted
     version: 3.11.0
