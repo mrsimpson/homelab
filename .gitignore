@@ -36,4 +36,3 @@ secrets/
 *.log
 *.tmp
 .cache/
-.k3s-backup

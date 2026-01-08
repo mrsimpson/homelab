@@ -18,6 +18,8 @@ import * as pulumi from "@pulumi/pulumi";
 export interface RegistrySecretsArgs {
   /** External Secrets Operator resource to depend on */
   externalSecretsOperator: pulumi.Resource;
+  /** Explicit output that represents webhook readiness (optional but recommended) */
+  webhookReady?: pulumi.Output<any>;
   /** ClusterSecretStore name (defaults to "pulumi-esc") */
   storeName?: string;
   /** List of namespaces to create the pull secret in (defaults to ["default"]) */
@@ -27,63 +29,51 @@ export interface RegistrySecretsArgs {
 /**
  * Creates GHCR (GitHub Container Registry) pull secret via External Secrets Operator
  *
- * This function creates an ExternalSecret that pulls GitHub credentials from Pulumi ESC
- * and creates a dockerconfigjson secret for pulling private GHCR images.
- *
- * IMPORTANT: Before using this function, you MUST configure your GitHub credentials
- * in your Pulumi ESC environment with these keys:
- *
- * For Pulumi ESC environment (recommended):
- *   1. Create a GitHub Personal Access Token (PAT) with `read:packages` scope:
- *      - Go to https://github.com/settings/tokens/new
- *      - Select scopes: "read:packages" minimum
- *      - Generate and copy the token
- *
- *   2. Create/update your Pulumi ESC environment with:
- *      ```yaml
- *      values:
- *        github-username: your-github-username
- *        github-token: your-github-token  # Mark as secret
- *      ```
- *
- *   3. Alternatively, use pulumi config set:
- *      ```bash
- *      pulumi config set --secret github-token "your-token"
- *      pulumi config set github-username "your-username"
- *      ```
- *
- * The ExternalSecret will then automatically:
- * - Fetch credentials from Pulumi ESC
- * - Create a Kubernetes secret in each target namespace
- * - Automatically refresh credentials every 1 hour
- * - Encode credentials as base64 for dockerconfigjson format
+ * Prerequisites:
+ * 1. Create a GitHub Personal Access Token with `read:packages` scope
+ * 2. Store credentials in Pulumi ESC:
+ *    - Key: github-credentials/username
+ *    - Key: github-credentials/token (secret)
  *
  * Usage:
  *   const ghcrSecret = createGhcrPullSecret({
  *     externalSecretsOperator: externalSecretsOperator,
- *     namespaces: ["nodejs-demo", "app-namespace"],
  *   });
  *
  *   // Then in ExposedWebApp:
  *   imagePullSecrets: [{ name: "ghcr-pull-secret" }]
- *
- * If credentials are not configured, the ExternalSecret will remain pending
- * and pods using the pull secret will fail with ImagePullBackOff errors.
- * Check the ExternalSecret status with:
- *   kubectl describe externalsecret ghcr-pull-secret -n <namespace>
  */
-export function createGhcrPullSecret(args: RegistrySecretsArgs, opts?: pulumi.ResourceOptions) {
+export function createGhcrPullSecret(
+  args: RegistrySecretsArgs,
+  opts?: pulumi.CustomResourceOptions
+) {
   const storeName = args.storeName || "pulumi-esc";
   const namespaces = args.namespaces || ["default"];
 
-  // Build dependency list
-  const dependencies = [args.externalSecretsOperator];
-  if (opts?.dependsOn) {
-    const depArray = Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
-    dependencies.push(...(depArray as pulumi.Resource[]));
+  // Build resource options with combined dependencies
+  const baseDeps: pulumi.Input<pulumi.Input<pulumi.Resource>[]> = [args.externalSecretsOperator];
+
+  // If webhookReady is provided, add it to dependencies to ensure webhook is responding
+  if (args.webhookReady) {
+    baseDeps.push(args.webhookReady);
   }
 
+  const optsDeps = opts?.dependsOn
+    ? Array.isArray(opts.dependsOn)
+      ? opts.dependsOn
+      : [opts.dependsOn]
+    : [];
+
+  const resourceOpts: pulumi.CustomResourceOptions = {
+    ...opts,
+    dependsOn: [...baseDeps, ...optsDeps] as pulumi.Input<pulumi.Input<pulumi.Resource>[]>,
+  };
+
   // Create ExternalSecret in each namespace
+  // NOTE: ExternalSecrets are validated by the external-secrets-webhook which takes time to stabilize.
+  // The webhook may experience transient failures when external-secrets is first deployed.
+  // We add the externalSecretsOperator as an explicit dependency and rely on Pulumi's
+  // resource dependency system to ensure proper ordering and retry behavior.
   const externalSecrets = namespaces.map(
     (ns) =>
       new k8s.apiextensions.CustomResource(
@@ -107,8 +97,7 @@ export function createGhcrPullSecret(args: RegistrySecretsArgs, opts?: pulumi.Re
               template: {
                 type: "kubernetes.io/dockerconfigjson",
                 data: {
-                  ".dockerconfigjson":
-                    '{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}',
+                  ".dockerconfigjson": pulumi.interpolate`{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
                 },
               },
             },
@@ -128,7 +117,7 @@ export function createGhcrPullSecret(args: RegistrySecretsArgs, opts?: pulumi.Re
             ],
           },
         },
-        { dependsOn: dependencies }
+        resourceOpts
       )
   );
 
@@ -148,17 +137,29 @@ export function createGhcrPullSecret(args: RegistrySecretsArgs, opts?: pulumi.Re
  */
 export function createDockerHubPullSecret(
   args: RegistrySecretsArgs,
-  opts?: pulumi.ResourceOptions
+  opts?: pulumi.CustomResourceOptions
 ) {
   const storeName = args.storeName || "pulumi-esc";
   const namespaces = args.namespaces || ["default"];
 
-  // Build dependency list
-  const dependencies = [args.externalSecretsOperator];
-  if (opts?.dependsOn) {
-    const depArray = Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
-    dependencies.push(...(depArray as pulumi.Resource[]));
+  // Build resource options with combined dependencies
+  const baseDeps: pulumi.Input<pulumi.Input<pulumi.Resource>[]> = [args.externalSecretsOperator];
+
+  // If webhookReady is provided, add it to dependencies to ensure webhook is responding
+  if (args.webhookReady) {
+    baseDeps.push(args.webhookReady);
   }
+
+  const optsDeps = opts?.dependsOn
+    ? Array.isArray(opts.dependsOn)
+      ? opts.dependsOn
+      : [opts.dependsOn]
+    : [];
+
+  const resourceOpts: pulumi.CustomResourceOptions = {
+    ...opts,
+    dependsOn: [...baseDeps, ...optsDeps] as pulumi.Input<pulumi.Input<pulumi.Resource>[]>,
+  };
 
   const externalSecrets = namespaces.map(
     (ns) =>
@@ -183,15 +184,15 @@ export function createDockerHubPullSecret(
               template: {
                 type: "kubernetes.io/dockerconfigjson",
                 data: {
-                  ".dockerconfigjson": `{
-   "auths": {
-     "https://index.docker.io/v1/": {
-       "username": "{{ .dockerhub_username }}",
-       "password": "{{ .dockerhub_token }}",
-       "auth": "{{ printf "%s:%s" .dockerhub_username .dockerhub_token | b64enc }}"
-     }
-   }
- }`,
+                  ".dockerconfigjson": pulumi.interpolate`{
+  "auths": {
+    "https://index.docker.io/v1/": {
+      "username": "{{ .dockerhub_username }}",
+      "password": "{{ .dockerhub_token }}",
+      "auth": "{{ printf "%s:%s" .dockerhub_username .dockerhub_token | b64enc }}"
+    }
+  }
+}`,
                 },
               },
             },
@@ -211,7 +212,7 @@ export function createDockerHubPullSecret(
             ],
           },
         },
-        { dependsOn: dependencies }
+        resourceOpts
       )
   );
 

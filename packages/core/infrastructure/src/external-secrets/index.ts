@@ -32,7 +32,7 @@ import * as pulumi from "@pulumi/pulumi";
 const config = new pulumi.Config();
 
 // Create namespace for External Secrets Operator
-export const externalSecretsNamespace = new k8s.core.v1.Namespace("external-secrets", {
+const namespace = new k8s.core.v1.Namespace("external-secrets", {
   metadata: {
     name: "external-secrets",
     labels: {
@@ -45,30 +45,19 @@ export const externalSecretsNamespace = new k8s.core.v1.Namespace("external-secr
 });
 
 // Deploy External Secrets Operator via Helm
-// CRITICAL FIX: Set webhook.failurePolicy to "Ignore" to prevent race condition
-// where ExternalSecret resources are validated before webhook pods are ready.
-// This allows resources to be created even if the webhook isn't responding yet,
-// preventing the "service not found" errors during cluster initialization.
-// Use explicit namespace string with explicit dependsOn to ensure namespace is created first
-export const externalSecretsOperator = new k8s.helm.v3.Release(
+export const externalSecretsOperator = new k8s.helm.v3.Chart(
   "external-secrets",
   {
     chart: "external-secrets",
     version: "0.11.0",
-    namespace: "external-secrets", // Use string directly, dependsOn ensures it exists
-    repositoryOpts: {
+    namespace: namespace.metadata.name,
+    fetchOpts: {
       repo: "https://charts.external-secrets.io",
     },
     values: {
       installCRDs: true,
       webhook: {
         port: 9443,
-        // Use failurePolicy: Ignore to prevent blocking resource creation
-        // when webhook pods aren't ready yet. This solves the race condition
-        // where ExternalSecret resources are created before the webhook service
-        // is available for validation.
-        // See: https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#failure-policy
-        failurePolicy: "Ignore",
       },
       // Resource limits for operator pods
       resources: {
@@ -89,7 +78,23 @@ export const externalSecretsOperator = new k8s.helm.v3.Release(
       },
     },
   },
-  { dependsOn: [externalSecretsNamespace] } // CRITICAL: Explicit dependency on namespace resource
+  { dependsOn: [namespace] }
+);
+
+// Create Pulumi API token secret for ESO to access Pulumi ESC
+// This token allows ESO to read secrets from Pulumi Cloud/ESC
+const pulumiApiTokenSecret = new k8s.core.v1.Secret(
+  "pulumi-api-token",
+  {
+    metadata: {
+      name: "pulumi-api-token",
+      namespace: namespace.metadata.name,
+    },
+    stringData: {
+      token: config.requireSecret("pulumiAccessToken"),
+    },
+  },
+  { dependsOn: [namespace] }
 );
 
 /**
@@ -98,32 +103,20 @@ export const externalSecretsOperator = new k8s.helm.v3.Release(
  * The webhook pod must be running and serving requests before we can create
  * resources that require webhook validation (ExternalSecrets, SecretStores).
  *
- * This works by depending on the Helm Release itself. Since the Helm chart
- * includes the webhook pod definition with readiness probes, the Release
- * deployment ensures the webhook pod is ready before returning.
+ * This works by getting the webhook Deployment resource from the Helm chart
+ * and ensuring it exists (which means the Helm deployment succeeded).
+ * Since the Helm chart includes the webhook pod definition with readiness probes,
+ * getting the Deployment implicitly waits for it to be deployed.
  */
-export function ensureWebhookReady(): pulumi.Resource {
-  // Return the external-secrets operator resource as a dependency marker
-  // Anything depending on this will wait for the webhook pod to be ready
-  return externalSecretsOperator;
+export function ensureWebhookReady(): pulumi.Output<any> {
+  // Get the webhook deployment from the Helm chart to ensure it's deployed
+  // This creates an implicit dependency on the webhook pod being ready
+  return externalSecretsOperator.getResource(
+    "apps/v1/Deployment",
+    "external-secrets",
+    "external-secrets-webhook"
+  ) as pulumi.Output<any>;
 }
-
-// Create Pulumi API token secret for ESO to access Pulumi ESC
-// This token allows ESO to read secrets from Pulumi Cloud/ESC
-// Must depend on externalSecretsOperator to ensure namespace is created first
-const pulumiApiTokenSecret = new k8s.core.v1.Secret(
-  "pulumi-api-token",
-  {
-    metadata: {
-      name: "pulumi-api-token",
-      namespace: "external-secrets", // Use string directly, dependsOn ensures it exists
-    },
-    stringData: {
-      token: config.requireSecret("pulumiAccessToken"),
-    },
-  },
-  { dependsOn: [externalSecretsNamespace, externalSecretsOperator] } // CRITICAL: Explicit dependencies
-);
 
 // Configure Pulumi ESC as a ClusterSecretStore backend
 // This allows all namespaces to pull secrets from Pulumi ESC
@@ -155,7 +148,8 @@ export const pulumiEscStore = new k8s.apiextensions.CustomResource(
   { dependsOn: [externalSecretsOperator, pulumiApiTokenSecret] }
 );
 
-// Note: externalSecretsNamespace is already exported as the namespace resource at the top of this file
+// Export status for verification
+export const externalSecretsNamespace = namespace.metadata.name;
 
 // Future: Vault ClusterSecretStore (commented out for now)
 /*
@@ -183,7 +177,7 @@ export const vaultStore = new k8s.apiextensions.CustomResource(
       },
     },
   },
-  { dependsOn: [externalSecretsNamespace, externalSecretsOperator] }
+  { dependsOn: [externalSecretsOperator] }
 );
 */
 
@@ -213,6 +207,6 @@ export const awsSecretsManagerStore = new k8s.apiextensions.CustomResource(
       },
     },
   },
-  { dependsOn: [externalSecretsNamespace, externalSecretsOperator] }
+  { dependsOn: [externalSecretsOperator] }
 );
 */

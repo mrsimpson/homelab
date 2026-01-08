@@ -25,7 +25,7 @@ import { createLonghornPrecheck } from "./validation";
  */
 
 // Create namespace for Longhorn
-export const longhornNamespaceResource = new k8s.core.v1.Namespace("longhorn-ns", {
+const namespace = new k8s.core.v1.Namespace("longhorn-ns", {
   metadata: {
     name: "longhorn-system",
     labels: {
@@ -46,13 +46,13 @@ const backupSecret = hasBackupCredentials()
   : undefined;
 
 // Install Longhorn via Helm with conditional R2 backup integration
-export const longhorn = new k8s.helm.v3.Release(
+export const longhorn = new k8s.helm.v3.Chart(
   "longhorn",
   {
     chart: "longhorn",
     version: "1.7.2",
-    namespace: "longhorn-system", // Use string directly, dependsOn ensures it exists
-    repositoryOpts: {
+    namespace: "longhorn-system",
+    fetchOpts: {
       repo: "https://charts.longhorn.io",
     },
     values: {
@@ -108,7 +108,7 @@ export const longhorn = new k8s.helm.v3.Release(
     },
   },
   {
-    dependsOn: [longhornNamespaceResource, ...(backupSecret ? [backupSecret] : [])],
+    dependsOn: [namespace, ...(backupSecret ? [backupSecret] : [])],
     // Configure Helm hook Jobs to not block Pulumi deployments
     // These are managed by Helm's lifecycle hooks and often fail
     transformations: [
@@ -141,9 +141,7 @@ const dailyBackupJob = hasBackupCredentials()
   : undefined;
 
 // Run prerequisite validation before deploying Longhorn
-const precheckJob = createLonghornPrecheck(
-  longhornNamespaceResource.metadata.apply((m) => m.name as string)
-);
+const precheckJob = createLonghornPrecheck(namespace.metadata.name);
 
 // Configure Longhorn node disk for K3s single-node cluster
 // In single-node K3s, the node "flinker" doesn't have dedicated storage disks.

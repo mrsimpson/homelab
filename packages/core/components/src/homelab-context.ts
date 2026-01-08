@@ -1,9 +1,10 @@
-import * as k8s from "@pulumi/kubernetes";
-import * as pulumi from "@pulumi/pulumi";
+import type * as k8s from "@pulumi/kubernetes";
+import type * as pulumi from "@pulumi/pulumi";
 import type {
   CloudflareConfig,
   ExposedWebAppArgs,
   ExternalSecretsConfig,
+  ForwardAuthConfig,
   IngressConfig,
   TLSConfig,
 } from "./ExposedWebApp";
@@ -20,6 +21,7 @@ export interface HomelabContextConfig {
   tls?: TLSConfig;
   ingress?: IngressConfig;
   externalSecrets?: ExternalSecretsConfig;
+  forwardAuth?: ForwardAuthConfig;
   namespaces?: Record<string, k8s.core.v1.Namespace>;
 }
 
@@ -31,9 +33,15 @@ export class HomelabContext {
    */
   createExposedWebApp(
     name: string,
-    args: Omit<ExposedWebAppArgs, "cloudflare" | "tls" | "ingress" | "externalSecrets">,
+    args: Omit<
+      ExposedWebAppArgs,
+      "cloudflare" | "tls" | "ingress" | "externalSecrets" | "forwardAuth" | "namespace"
+    >,
     opts?: pulumi.ComponentResourceOptions
   ): ExposedWebApp {
+    // Check if a namespace was pre-created for this app
+    const existingNamespace = this.config.namespaces?.[name];
+
     return new ExposedWebApp(
       name,
       {
@@ -42,6 +50,8 @@ export class HomelabContext {
         tls: this.config.tls,
         ingress: this.config.ingress,
         externalSecrets: this.config.externalSecrets,
+        forwardAuth: this.config.forwardAuth,
+        namespace: existingNamespace,
       },
       opts
     );

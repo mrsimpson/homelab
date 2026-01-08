@@ -17,7 +17,7 @@ import * as k8s from "@pulumi/kubernetes";
  */
 
 // Create namespace for cert-manager
-export const certManagerNamespace = new k8s.core.v1.Namespace("cert-manager-ns", {
+const namespace = new k8s.core.v1.Namespace("cert-manager-ns", {
   metadata: {
     name: "cert-manager",
     labels: {
@@ -30,14 +30,13 @@ export const certManagerNamespace = new k8s.core.v1.Namespace("cert-manager-ns",
 });
 
 // Install cert-manager via Helm
-// Use explicit namespace string with explicit dependsOn to ensure namespace is created first
-export const certManager = new k8s.helm.v3.Release(
+export const certManager = new k8s.helm.v3.Chart(
   "cert-manager",
   {
     chart: "cert-manager",
     version: "v1.14.0",
-    namespace: "cert-manager", // Use string directly, dependsOn ensures it exists
-    repositoryOpts: {
+    namespace: namespace.metadata.name,
+    fetchOpts: {
       repo: "https://charts.jetstack.io",
     },
     values: {
@@ -50,7 +49,7 @@ export const certManager = new k8s.helm.v3.Release(
     },
   },
   {
-    dependsOn: [certManagerNamespace], // CRITICAL: Explicit dependency on namespace resource
+    dependsOn: [namespace],
   }
 );
 

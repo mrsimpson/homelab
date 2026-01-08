@@ -2,7 +2,14 @@
 set -e
 
 # Restore Pulumi config from encrypted backup
-# Pure bash with simple YAML parsing
+# This decrypts the SOPS-encrypted config and restores it to a Pulumi stack
+# Usage: ./restore-config.sh [stack-name] [secret-key=value ...]
+#
+# Examples:
+#   cat ~/.sops-backup/key.age | ./restore-config.sh production
+#   SOPS_AGE_KEY=$(cat ~/.sops-backup/key.age) ./restore-config.sh production
+#   SOPS_AGE_KEY_FILE=~/.sops-backup/key.age ./restore-config.sh production
+#   ./restore-config.sh production cloudflare:apiToken=abc123
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/pulumi-config.enc.yaml"
@@ -13,147 +20,177 @@ trap "rm -f $TEMP_CONFIG $TEMP_KEY" EXIT
 
 STACK_NAME="${1:-.}"
 
+# Collect secrets passed as arguments (key=value format)
 declare -A OVERRIDE_SECRETS
 shift || true
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == *"="* ]]; then
-    OVERRIDE_SECRETS["${1%%=*}"]="${1#*=}"
+    KEY="${1%%=*}"
+    VALUE="${1#*=}"
+    OVERRIDE_SECRETS["$KEY"]="$VALUE"
   fi
   shift
 done
 
+# Check prerequisites
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Error: Encrypted config not found at $CONFIG_FILE"
+    echo "Please run export-config.sh first"
     exit 1
 fi
 
+# Handle AGE key from multiple sources (in priority order)
 if [ -n "$SOPS_AGE_KEY_FILE" ] && [ -f "$SOPS_AGE_KEY_FILE" ]; then
+    # Key file path provided via environment variable
     export SOPS_AGE_KEY_FILE="$SOPS_AGE_KEY_FILE"
 elif [ -n "$SOPS_AGE_KEY" ]; then
+    # Key provided directly via environment variable
     echo "$SOPS_AGE_KEY" > "$TEMP_KEY"
     chmod 600 "$TEMP_KEY"
     export SOPS_AGE_KEY_FILE="$TEMP_KEY"
 elif [ -f "$SCRIPT_DIR/.sops.age" ]; then
+    # Fall back to local key file in script directory
     export SOPS_AGE_KEY_FILE="$SCRIPT_DIR/.sops.age"
-elif [ ! -t 0 ]; then
-    cat > "$TEMP_KEY"
-    chmod 600 "$TEMP_KEY"
-    export SOPS_AGE_KEY_FILE="$TEMP_KEY"
 else
-    echo "Error: AGE key not found"
-    exit 1
+    # Try to read from stdin if available
+    if [ ! -t 0 ]; then
+        cat > "$TEMP_KEY"
+        chmod 600 "$TEMP_KEY"
+        export SOPS_AGE_KEY_FILE="$TEMP_KEY"
+    else
+        echo "Error: AGE key not found. Provide one of:"
+        echo "  1. Pipe the key: cat ~/.sops-backup/key.age | ./restore-config.sh production"
+        echo "  2. Environment variable: SOPS_AGE_KEY=\$(cat key.age) ./restore-config.sh production"
+        echo "  3. Key file path: SOPS_AGE_KEY_FILE=~/.sops-backup/key.age ./restore-config.sh production"
+        echo "  4. Local file: Place .sops.age in the script directory"
+        exit 1
+    fi
 fi
 
 echo "======================================"
 echo "Pulumi Config Restore"
 echo "======================================"
+echo ""
 echo "Target stack: $STACK_NAME"
 echo ""
 
+# Decrypt config
 echo "Decrypting configuration..."
 "$SOPS" -d "$CONFIG_FILE" > "$TEMP_CONFIG"
 
+# Parse YAML and restore to Pulumi
 echo "Restoring configuration to Pulumi..."
+echo "Note: ESC environments require 'pulumi env edit' permissions"
+OVERRIDE_SECRETS_JSON=$(for key in "${!OVERRIDE_SECRETS[@]}"; do echo "\"$key\": \"${OVERRIDE_SECRETS[$key]}\""; done | paste -sd, -)
+if [ -z "$OVERRIDE_SECRETS_JSON" ]; then
+  OVERRIDE_SECRETS_JSON="{}"
+else
+  OVERRIDE_SECRETS_JSON="{$OVERRIDE_SECRETS_JSON}"
+fi
 
-# Parse config with simple approach
-sed -n '/^config:/,/^esc_environments:/p' "$TEMP_CONFIG" | \
-grep -E "^    [a-zA-Z]|^        (secret|value):" | \
-awk '
-/^    [a-zA-Z]/ {
-    if (key != "") {
-        print key "|" secret "|" value
-    }
-    key = $1
-    gsub(/:$/, "", key)
-    secret = ""
-    value = ""
-    next
-}
-/secret:/ {
-    secret = $2
-}
-/value:/ {
-    value = substr($0, index($0, $2))
-    gsub(/^['\''"]/, "", value)
-    gsub(/['\''"]$/, "", value)
-}
-END {
-    if (key != "") {
-        print key "|" secret "|" value
-    }
-}
-' | while IFS='|' read -r key secret_val value_val; do
-    [ -z "$key" ] && continue
-    
-    if [ -v "OVERRIDE_SECRETS[$key]" ]; then
-        value_val="${OVERRIDE_SECRETS[$key]}"
-    fi
-    
-    [ -z "$value_val" ] && continue
-    
-    is_secret=0
-    [ "$secret_val" == "true" ] && is_secret=1
-    
-    if [ "$is_secret" == "1" ] && [ -z "$value_val" ]; then
-        echo "[WARN] Skipping secret (empty): $key"
+OVERRIDE_SECRETS_JSON="$OVERRIDE_SECRETS_JSON" python3 << PYTHON
+import yaml
+import subprocess
+import sys
+import json
+import os
+
+with open('$TEMP_CONFIG', 'r') as f:
+    config_data = yaml.safe_load(f)
+
+if not config_data or 'config' not in config_data:
+    print("Error: No config found in decrypted file")
+    sys.exit(1)
+
+stack = '$STACK_NAME'
+failed_keys = []
+
+# Load override secrets from environment
+override_secrets = json.loads(os.environ.get('OVERRIDE_SECRETS_JSON', '{}'))
+
+for key, val in config_data['config'].items():
+    value = val.get('value', '')
+    is_secret = val.get('secret', False)
+
+    # Use override secret if provided
+    if key in override_secrets:
+        value = override_secrets[key]
+
+    # Skip empty values for secrets (user must set them manually)
+    if is_secret and not value:
+        print(f"⚠️  Skipping secret (empty): {key}")
+        print(f"   Please set manually: pulumi config set --secret {key} <value> --stack {stack}")
         continue
-    fi
-    
-    if [ "$is_secret" == "1" ]; then
-        if pulumi config set --secret "$key" "$value_val" --stack "$STACK_NAME" 2>/dev/null; then
-            echo "[OK]   $key"
-        else
-            echo "[FAIL] $key"
-        fi
-    else
-        if pulumi config set "$key" "$value_val" --stack "$STACK_NAME" 2>/dev/null; then
-            echo "[OK]   $key"
-        else
-            echo "[FAIL] $key"
-        fi
-    fi
-done
 
-# Handle ESC environments - much simpler approach
-echo ""
-echo "--- Restoring ESC Environments ---"
+    try:
+        cmd = ['pulumi', 'config', 'set']
+        if is_secret:
+            cmd.append('--secret')
+        cmd.extend([key, str(value), '--stack', stack])
+        subprocess.run(cmd, check=True, capture_output=True)
+        print(f"✓ {key}")
+    except subprocess.CalledProcessError as e:
+        print(f"✗ {key}: {e.stderr.decode()}")
+        failed_keys.append(key)
 
-# Extract environment names
-sed -n '/^esc_environments:/,$p' "$TEMP_CONFIG" | grep "^    [a-zA-Z0-9_]*:$" | while read -r env_line; do
-    env_key=$(echo "$env_line" | sed 's/:$//')
-    
-    # Get environment name  
-    env_name=$(sed -n "/^    $env_key:/,/^    [a-zA-Z]/p" "$TEMP_CONFIG" | grep "name: " | sed 's/.*name: //; s/['\''"]//g' | head -1)
-    
-    [ -z "$env_name" ] && continue
-    
-    # Create ESC YAML file - extract everything under "values:" and reformat
-    TEMP_ESC=$(mktemp)
-    {
-        echo "values:"
-        # Find the values section and extract with proper indentation
-        sed -n "/^    $env_key:/,/^    [a-zA-Z]/p" "$TEMP_CONFIG" | \
-            sed -n '/^        values:/,/^        [a-z]/p' | \
-            tail -n +2 | \
-            sed 's/^        /  /'
-    } > "$TEMP_ESC"
-    
-    # Restore if has content
-    if [ -s "$TEMP_ESC" ] && grep -q "[a-zA-Z]" "$TEMP_ESC"; then
-        if pulumi env edit "$env_name" --file "$TEMP_ESC" 2>/dev/null; then
-            echo "[OK]   ESC: $env_name"
-        else
-            echo "[FAIL] ESC: $env_name"
-        fi
-    else
-        echo "[WARN] ESC environment empty: $env_name"
-    fi
-    
-    rm -f "$TEMP_ESC"
-done
+# Restore ESC environments
+esc_failed_envs = []
+if 'esc_environments' in config_data:
+    print("\n--- Restoring ESC Environments ---")
+    for env_key, env_config in config_data['esc_environments'].items():
+        env_name = env_config.get('name', env_key)
+        env_values = env_config.get('values', {})
+
+        if not env_values:
+            print(f"⚠️  Skipping ESC environment (empty): {env_name}")
+            continue
+
+        try:
+            # Create a temporary YAML file for the environment definition
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_env_file:
+                yaml.dump({'values': env_values}, temp_env_file, default_flow_style=False)
+                temp_env_path = temp_env_file.name
+
+            # Import the environment using pulumi env edit
+            cmd = ['pulumi', 'env', 'edit', env_name, '--file', temp_env_path]
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+            # Clean up temp file
+            os.unlink(temp_env_path)
+
+            print(f"✓ ESC environment: {env_name}")
+
+        except subprocess.CalledProcessError as e:
+            print(f"✗ ESC environment {env_name}: {e.stderr.decode().strip()}")
+            esc_failed_envs.append(env_name)
+            # Clean up temp file on error
+            try:
+                os.unlink(temp_env_path)
+            except:
+                pass
+        except Exception as e:
+            print(f"✗ ESC environment {env_name}: {str(e)}")
+            esc_failed_envs.append(env_name)
+
+total_failures = len(failed_keys) + len(esc_failed_envs)
+if total_failures > 0:
+    print(f"\nWarning: {len(failed_keys)} configuration(s) and {len(esc_failed_envs)} ESC environment(s) failed to restore")
+    if esc_failed_envs:
+        print("ESC environment failures may be due to missing permissions.")
+        print("You may need to manually restore ESC environments using:")
+        for env_name in esc_failed_envs:
+            print(f"  pulumi env edit {env_name}")
+    sys.exit(1)
+else:
+    print(f"\n✓ All configurations and ESC environments restored successfully")
+
+PYTHON
 
 echo ""
 echo "======================================"
 echo "Restore Complete!"
 echo "======================================"
+echo ""
+echo "Verify: pulumi config --stack $STACK_NAME"
 echo ""

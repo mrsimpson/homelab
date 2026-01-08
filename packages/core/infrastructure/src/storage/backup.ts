@@ -1,6 +1,6 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
-import { getBackupCredentials, backupTargetRoot, hasBackupCredentials } from "./r2-buckets";
+import { backupTargetRoot, getBackupCredentials, hasBackupCredentials } from "./r2-buckets";
 
 /**
  * Longhorn Backup Configuration

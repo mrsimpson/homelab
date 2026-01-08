@@ -15,7 +15,7 @@ PROJECT_DIR="${1:-.}"
 KEY_FILE="$SCRIPT_DIR/.sops.age"
 SOPS_CONFIG_FILE="$SCRIPT_DIR/.sops.yaml"
 CONFIG_FILE="$SCRIPT_DIR/pulumi-config.enc.yaml"
-SOPS="${HOME}/go/bin/sops"
+SOPS="$(which sops)"
 TEMP_CONFIG=$(mktemp)
 
 # Collect secrets passed as arguments (key=value format)
@@ -89,7 +89,7 @@ if env_list:
                 else:
                     # Already full name like 'mrsimpson/homelab/dev'
                     full_env = env
-                
+
                 result = subprocess.run(['pulumi', 'env', 'open', full_env], capture_output=True, text=True)
                 if result.returncode == 0:
                     envs[full_env] = json.loads(result.stdout)

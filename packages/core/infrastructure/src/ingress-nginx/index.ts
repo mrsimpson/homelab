@@ -12,7 +12,7 @@ import * as k8s from "@pulumi/kubernetes";
 // Create namespace for ingress-nginx
 // Note: Using "privileged" because ingress-nginx requires hostNetwork and hostPort
 // This is necessary for k3s which doesn't have a LoadBalancer service
-export const ingressNginxNamespace = new k8s.core.v1.Namespace("ingress-nginx-ns", {
+const namespace = new k8s.core.v1.Namespace("ingress-nginx-ns", {
   metadata: {
     name: "ingress-nginx",
     labels: {
@@ -24,14 +24,13 @@ export const ingressNginxNamespace = new k8s.core.v1.Namespace("ingress-nginx-ns
   },
 });
 
-// Use explicit namespace string with explicit dependsOn to ensure namespace is created first
-export const ingressNginx = new k8s.helm.v3.Release(
+export const ingressNginx = new k8s.helm.v3.Chart(
   "ingress-nginx",
   {
     chart: "ingress-nginx",
     version: "4.9.0",
-    namespace: "ingress-nginx", // Use string directly, dependsOn ensures it exists
-    repositoryOpts: {
+    namespace: namespace.metadata.name,
+    fetchOpts: {
       repo: "https://kubernetes.github.io/ingress-nginx",
     },
     values: {
@@ -75,15 +74,10 @@ export const ingressNginx = new k8s.helm.v3.Release(
           "allow-snippet-annotations": "true",
         },
       },
-      // Webhook configuration - use failurePolicy: Ignore to prevent validation
-      // webhook from blocking Ingress creation before the webhook service is ready
-      admissionWebhooks: {
-        failurePolicy: "Ignore",
-      },
     },
   },
   {
-    dependsOn: [ingressNginxNamespace], // CRITICAL: Explicit dependency on namespace resource
+    dependsOn: [namespace],
   }
 );
 
