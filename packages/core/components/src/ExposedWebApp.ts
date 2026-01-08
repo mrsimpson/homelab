@@ -39,8 +39,13 @@ import * as pulumi from "@pulumi/pulumi";
  *     image: "ghcr.io/username/my-app:latest",
  *     domain: "blog.example.com",
  *     port: 2368,
- *     imagePullSecrets: [{ name: "ghcr-pull-secret" }]
+ *     imagePullSecrets: [{ name: "ghcr-pull-secret" }],
+ *     externalSecrets: {
+ *       operator: externalSecretsOperator
+ *     }
  *   });
+ *   // Note: If creating a new namespace, ExternalSecret for known pull secrets
+ *   // (ghcr-pull-secret, dockerhub-pull-secret) will be auto-created
  *
  * Example (standalone):
  *   new ExposedWebApp("blog", {
@@ -162,6 +167,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     const childOpts = { parent: this };
 
     // Use provided namespace or create a new one
+    const isCreatingNamespace = !args.namespace;
     const namespace =
       args.namespace ||
       new k8s.core.v1.Namespace(
@@ -181,6 +187,125 @@ export class ExposedWebApp extends pulumi.ComponentResource {
         },
         childOpts
       );
+
+    // If creating a new namespace AND imagePullSecrets are specified,
+    // automatically create ExternalSecrets for common pull secret names
+    // This ensures private images can be pulled without manual secret creation
+    const pullSecretResources: k8s.apiextensions.CustomResource[] = [];
+    if (isCreatingNamespace && args.imagePullSecrets && args.externalSecrets) {
+      const storeName = args.externalSecrets.storeName || "pulumi-esc";
+
+      // Create dependencies for ExternalSecret
+      const externalSecretDeps: pulumi.Resource[] = [namespace];
+      if (args.externalSecrets.operator) {
+        externalSecretDeps.push(args.externalSecrets.operator);
+      }
+
+      args.imagePullSecrets.forEach((pullSecret) => {
+        // Only auto-create for known secret names to avoid creating unnecessary resources
+        if (pullSecret.name === "ghcr-pull-secret") {
+          pullSecretResources.push(
+            new k8s.apiextensions.CustomResource(
+              `${name}-ghcr-pull-secret`,
+              {
+                apiVersion: "external-secrets.io/v1beta1",
+                kind: "ExternalSecret",
+                metadata: {
+                  name: "ghcr-pull-secret",
+                  namespace: namespace.metadata.name,
+                },
+                spec: {
+                  refreshInterval: "1h",
+                  secretStoreRef: {
+                    name: storeName,
+                    kind: "ClusterSecretStore",
+                  },
+                  target: {
+                    name: "ghcr-pull-secret",
+                    creationPolicy: "Owner",
+                    template: {
+                      type: "kubernetes.io/dockerconfigjson",
+                      data: {
+                        ".dockerconfigjson": `{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
+                      },
+                    },
+                  },
+                  data: [
+                    {
+                      secretKey: "github_username",
+                      remoteRef: {
+                        key: "github-username",
+                      },
+                    },
+                    {
+                      secretKey: "github_token",
+                      remoteRef: {
+                        key: "github-token",
+                      },
+                    },
+                  ],
+                },
+              },
+              { ...childOpts, dependsOn: externalSecretDeps }
+            )
+          );
+        } else if (pullSecret.name === "dockerhub-pull-secret") {
+          pullSecretResources.push(
+            new k8s.apiextensions.CustomResource(
+              `${name}-dockerhub-pull-secret`,
+              {
+                apiVersion: "external-secrets.io/v1beta1",
+                kind: "ExternalSecret",
+                metadata: {
+                  name: "dockerhub-pull-secret",
+                  namespace: namespace.metadata.name,
+                },
+                spec: {
+                  refreshInterval: "1h",
+                  secretStoreRef: {
+                    name: storeName,
+                    kind: "ClusterSecretStore",
+                  },
+                  target: {
+                    name: "dockerhub-pull-secret",
+                    creationPolicy: "Owner",
+                    template: {
+                      type: "kubernetes.io/dockerconfigjson",
+                      data: {
+                        ".dockerconfigjson": `{
+  "auths": {
+    "https://index.docker.io/v1/": {
+      "username": "{{ .dockerhub_username }}",
+      "password": "{{ .dockerhub_token }}",
+      "auth": "{{ printf "%s:%s" .dockerhub_username .dockerhub_token | b64enc }}"
+    }
+  }
+}`,
+                      },
+                    },
+                  },
+                  data: [
+                    {
+                      secretKey: "dockerhub_username",
+                      remoteRef: {
+                        key: "dockerhub-credentials/username",
+                      },
+                    },
+                    {
+                      secretKey: "dockerhub_token",
+                      remoteRef: {
+                        key: "dockerhub-credentials/token",
+                      },
+                    },
+                  ],
+                },
+              },
+              { ...childOpts, dependsOn: externalSecretDeps }
+            )
+          );
+        }
+      });
+    }
 
     // Optional: Create PVC for persistent storage
     if (args.storage) {
@@ -254,6 +379,9 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     }
 
     // Create Deployment
+    // Build deployment dependencies - include pull secrets if we created them
+    const deploymentDeps: pulumi.Resource[] = [namespace, ...pullSecretResources];
+
     this.deployment = new k8s.apps.v1.Deployment(
       `${name}-deployment`,
       {
@@ -292,7 +420,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           },
         },
       },
-      { ...childOpts, dependsOn: [namespace] }
+      { ...childOpts, dependsOn: deploymentDeps }
     );
 
     // Create Service
