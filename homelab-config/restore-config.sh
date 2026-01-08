@@ -88,21 +88,93 @@ else
   OVERRIDE_SECRETS_JSON="{$OVERRIDE_SECRETS_JSON}"
 fi
 
-OVERRIDE_SECRETS_JSON="$OVERRIDE_SECRETS_JSON" python3 << PYTHON
-import yaml
+OVERRIDE_SECRETS_JSON="$OVERRIDE_SECRETS_JSON" TEMP_CONFIG="$TEMP_CONFIG" STACK_NAME="$STACK_NAME" python3 << 'PYTHON'
+import json
 import subprocess
 import sys
-import json
 import os
+import re
 
-with open('$TEMP_CONFIG', 'r') as f:
-    config_data = yaml.safe_load(f)
+# Simple YAML parser for our specific format (avoiding PyYAML dependency)
+def parse_simple_yaml(content):
+    config_data = {'config': {}}
+    lines = content.split('\n')
+    i = 0
+    in_config = False
+    
+    while i < len(lines):
+        line = lines[i]
+        
+        # Start config section
+        if line.strip() == 'config:':
+            in_config = True
+            i += 1
+            continue
+            
+        # End config section
+        if in_config and line and not line.startswith(' '):
+            in_config = False
+            
+        # Parse config entries (4 spaces indentation)
+        if in_config and re.match(r'^    .+:$', line):
+            # Extract key name
+            key = line.strip().rstrip(':')
+            entry = {}
+            i += 1
+            
+            # Parse the properties (8 spaces indentation)
+            while i < len(lines):
+                prop_line = lines[i]
+                
+                # Check if this is still part of this entry
+                if not prop_line.startswith('        '):
+                    break
+                    
+                if 'secret: true' in prop_line:
+                    entry['secret'] = True
+                elif 'value:' in prop_line:
+                    value_part = prop_line[prop_line.find('value:') + 6:].strip()
+                    
+                    if value_part == '|-':
+                        # Multi-line value
+                        value_lines = []
+                        i += 1
+                        while i < len(lines) and lines[i].startswith('            '):
+                            value_lines.append(lines[i][12:])  # Remove 12 spaces
+                            i += 1
+                        entry['value'] = '\n'.join(value_lines)
+                        continue  # Don't increment i again
+                    else:
+                        # Single line value (possibly JSON quoted)
+                        if value_part.startswith('"') and value_part.endswith('"'):
+                            # JSON string - remove quotes and handle escapes
+                            entry['value'] = json.loads(value_part)
+                        else:
+                            entry['value'] = value_part
+                
+                i += 1
+            
+            config_data['config'][key] = entry
+            continue
+            
+        i += 1
+    
+    return config_data
+
+# Read and parse the config file
+temp_config = os.environ.get('TEMP_CONFIG')
+with open(temp_config, 'r') as f:
+    content = f.read()
+
+config_data = parse_simple_yaml(content)
 
 if not config_data or 'config' not in config_data:
     print("Error: No config found in decrypted file")
     sys.exit(1)
 
-stack = '$STACK_NAME'
+print(f"Found {len(config_data.get('config', {}))} config entries")
+
+stack = os.environ.get('STACK_NAME')
 failed_keys = []
 
 # Load override secrets from environment
@@ -126,66 +198,32 @@ for key, val in config_data['config'].items():
         cmd = ['pulumi', 'config', 'set']
         if is_secret:
             cmd.append('--secret')
-        cmd.extend([key, str(value), '--stack', stack])
-        subprocess.run(cmd, check=True, capture_output=True)
+        cmd.extend([key, '--stack', stack])
+        
+        # Handle multi-line values by using stdin
+        if '\n' in str(value):
+            # For multi-line values, use stdin redirection
+            result = subprocess.run(cmd, input=str(value), text=True, check=True, capture_output=True)
+        else:
+            # For single-line values, use command argument (faster)
+            cmd.append(str(value))
+            result = subprocess.run(cmd, check=True, capture_output=True)
         print(f"✓ {key}")
     except subprocess.CalledProcessError as e:
-        print(f"✗ {key}: {e.stderr.decode()}")
+        error_msg = e.stderr.decode() if e.stderr else str(e)
+        print(f"✗ {key}: {error_msg.strip()}")
         failed_keys.append(key)
 
-# Restore ESC environments
-esc_failed_envs = []
-if 'esc_environments' in config_data:
-    print("\n--- Restoring ESC Environments ---")
-    for env_key, env_config in config_data['esc_environments'].items():
-        env_name = env_config.get('name', env_key)
-        env_values = env_config.get('values', {})
-
-        if not env_values:
-            print(f"⚠️  Skipping ESC environment (empty): {env_name}")
-            continue
-
-        try:
-            # Create a temporary YAML file for the environment definition
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_env_file:
-                yaml.dump({'values': env_values}, temp_env_file, default_flow_style=False)
-                temp_env_path = temp_env_file.name
-
-            # Import the environment using pulumi env edit
-            cmd = ['pulumi', 'env', 'edit', env_name, '--file', temp_env_path]
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-
-            # Clean up temp file
-            os.unlink(temp_env_path)
-
-            print(f"✓ ESC environment: {env_name}")
-
-        except subprocess.CalledProcessError as e:
-            print(f"✗ ESC environment {env_name}: {e.stderr.decode().strip()}")
-            esc_failed_envs.append(env_name)
-            # Clean up temp file on error
-            try:
-                os.unlink(temp_env_path)
-            except:
-                pass
-        except Exception as e:
-            print(f"✗ ESC environment {env_name}: {str(e)}")
-            esc_failed_envs.append(env_name)
-
-total_failures = len(failed_keys) + len(esc_failed_envs)
-if total_failures > 0:
-    print(f"\nWarning: {len(failed_keys)} configuration(s) and {len(esc_failed_envs)} ESC environment(s) failed to restore")
-    if esc_failed_envs:
-        print("ESC environment failures may be due to missing permissions.")
-        print("You may need to manually restore ESC environments using:")
-        for env_name in esc_failed_envs:
-            print(f"  pulumi env edit {env_name}")
-    sys.exit(1)
+if failed_keys:
+    print(f"\n⚠️  Failed to restore {len(failed_keys)} config key(s): {', '.join(failed_keys)}")
 else:
-    print(f"\n✓ All configurations and ESC environments restored successfully")
+    print(f"\n✅ Successfully restored {len(config_data['config'])} config key(s)")
 
 PYTHON
+
+echo ""
+echo "✅ Configuration restore complete!"
+echo "You can now run 'pulumi up' to deploy to stack '$STACK_NAME'"
 
 echo ""
 echo "======================================"

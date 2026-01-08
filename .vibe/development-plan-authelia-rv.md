@@ -83,6 +83,8 @@ Add proper authentication to the homelab stack, exploring options beyond the exi
 - [x] Fix Authelia deployment configuration based on working claude/homelab-auth-stack-lNC7I branch
 - [x] Add enableServiceLinks: false to prevent Kubernetes env var conflicts
 - [x] Fix configuration format and environment variable substitution
+- [x] Fix config restore script to handle multi-line secrets without PyYAML dependency
+- [x] Implement custom YAML parser for restore script compatibility
 - [ ] Create initial Authelia configuration with GitHub/Google OAuth
 - [ ] Implement OIDC client configuration for Supabase compatibility
 - [ ] Add forward auth testing with existing nginx setup
