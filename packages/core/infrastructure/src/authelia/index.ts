@@ -2,16 +2,14 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 
 /**
- * Authelia - Centralized Authentication Service
+ * Authelia - Simple SQLite-based Authentication Service
  *
  * Provides:
- * - Forward authentication for nginx ingress (auth-url, auth-signin)
- * - OpenID Connect provider for external applications (Supabase)
- * - GitHub/Google OAuth federation
- * - SQLite backend for homelab-appropriate simplicity
+ * - Forward authentication for nginx ingress
+ * - OIDC provider for external applications (Supabase)
+ * - SQLite backend for homelab simplicity
  *
- * This module creates a singleton authentication service that serves the entire homelab.
- * Applications use forward auth by setting auth: AuthType.FORWARD in ExposedWebApp.
+ * This is a minimal implementation focused on simplicity over enterprise features.
  */
 
 // Create namespace for Authelia
@@ -27,12 +25,12 @@ export const autheliaNamespace = new k8s.core.v1.Namespace("authelia-ns", {
   },
 });
 
-// Get Pulumi configuration for Authelia
+// Get configuration
 const autheliaConfig = new pulumi.Config("authelia");
 const homelabConfig = new pulumi.Config("homelab");
 
-// Create secret for Authelia environment variables
-const autheliaSecrets = new k8s.core.v1.Secret(
+// Create secrets for Authelia environment variables
+export const autheliaSecrets = new k8s.core.v1.Secret(
   "authelia-secrets",
   {
     metadata: {
@@ -50,11 +48,9 @@ const autheliaSecrets = new k8s.core.v1.Secret(
   }
 );
 
-// Create Authelia configuration with proper v4.38.0 format
+// Create Authelia configuration
 const autheliaConfigYaml = pulumi
-  .all([
-    homelabConfig.require("domain"), // Use existing homelab domain
-  ])
+  .all([homelabConfig.require("domain")])
   .apply(([homelabDomain]) => {
     const authDomain = `auth.${homelabDomain}`;
     const sessionDomain = homelabDomain;
@@ -127,7 +123,7 @@ identity_validation:
 `;
   });
 
-// Create basic users database (will be replaced with OAuth later)
+// Create users database
 const usersDatabase = pulumi.all([homelabConfig.require("domain")]).apply(
   ([domain]) => `users:
   admin:
@@ -158,7 +154,7 @@ export const autheliaConfigMap = new k8s.core.v1.ConfigMap(
   }
 );
 
-// Create PVC for SQLite database and session storage
+// Create PVC for SQLite database
 export const autheliaPvc = new k8s.core.v1.PersistentVolumeClaim(
   "authelia-storage",
   {
@@ -168,10 +164,10 @@ export const autheliaPvc = new k8s.core.v1.PersistentVolumeClaim(
     },
     spec: {
       accessModes: ["ReadWriteOnce"],
-      storageClassName: "longhorn-persistent", // Automatic R2 backups
+      storageClassName: "longhorn-persistent",
       resources: {
         requests: {
-          storage: "1Gi", // SQLite database + session storage
+          storage: "1Gi",
         },
       },
     },
@@ -190,48 +186,36 @@ export const autheliaDeployment = new k8s.apps.v1.Deployment(
       namespace: autheliaNamespace.metadata.name,
       labels: {
         app: "authelia",
-        environment: "homelab",
       },
     },
     spec: {
-      replicas: 1, // Single replica for homelab
+      replicas: 1,
       selector: {
-        matchLabels: {
-          app: "authelia",
-        },
+        matchLabels: { app: "authelia" },
       },
       template: {
         metadata: {
-          labels: {
-            app: "authelia",
-          },
+          labels: { app: "authelia" },
         },
         spec: {
-          // Disable automatic service link environment variables to prevent Authelia config parsing errors
-          // Kubernetes injects AUTHELIA_SERVICE_* env vars which conflict with Authelia's deprecation mapping
+          // Critical: Disable service links to prevent env var conflicts
           enableServiceLinks: false,
           securityContext: {
             runAsNonRoot: true,
             runAsUser: 1000,
-            runAsGroup: 1000,
             fsGroup: 1000,
           },
           containers: [
             {
               name: "authelia",
               image: "authelia/authelia:4.38.0",
-              ports: [
-                {
-                  containerPort: 9091,
-                  name: "http",
-                },
-              ],
+              ports: [{ containerPort: 9091, name: "http" }],
               env: [
                 {
                   name: "JWT_SECRET",
                   valueFrom: {
                     secretKeyRef: {
-                      name: "authelia-secrets", // We'll create this secret
+                      name: autheliaSecrets.metadata.name,
                       key: "jwtSecret",
                     },
                   },
@@ -240,7 +224,7 @@ export const autheliaDeployment = new k8s.apps.v1.Deployment(
                   name: "STORAGE_ENCRYPTION_KEY",
                   valueFrom: {
                     secretKeyRef: {
-                      name: "authelia-secrets",
+                      name: autheliaSecrets.metadata.name,
                       key: "encryptionKey",
                     },
                   },
@@ -258,23 +242,13 @@ export const autheliaDeployment = new k8s.apps.v1.Deployment(
                 },
               ],
               resources: {
-                requests: {
-                  cpu: "100m",
-                  memory: "128Mi",
-                },
-                limits: {
-                  cpu: "500m",
-                  memory: "512Mi",
-                },
+                requests: { cpu: "50m", memory: "128Mi" },
+                limits: { cpu: "200m", memory: "256Mi" },
               },
               securityContext: {
                 allowPrivilegeEscalation: false,
-                capabilities: {
-                  drop: ["ALL"],
-                },
-                seccompProfile: {
-                  type: "RuntimeDefault",
-                },
+                capabilities: { drop: ["ALL"] },
+                seccompProfile: { type: "RuntimeDefault" },
               },
             },
           ],
@@ -297,7 +271,7 @@ export const autheliaDeployment = new k8s.apps.v1.Deployment(
     },
   },
   {
-    dependsOn: [autheliaNamespace, autheliaConfigMap, autheliaPvc, autheliaSecrets],
+    dependsOn: [autheliaConfigMap, autheliaSecrets, autheliaPvc],
   }
 );
 
@@ -311,9 +285,7 @@ export const autheliaService = new k8s.core.v1.Service(
     },
     spec: {
       type: "ClusterIP",
-      selector: {
-        app: "authelia",
-      },
+      selector: { app: "authelia" },
       ports: [
         {
           port: 9091,
@@ -329,7 +301,7 @@ export const autheliaService = new k8s.core.v1.Service(
   }
 );
 
-// Create Ingress for Authelia (public access for auth flows)
+// Create Ingress for Authelia public access
 export const autheliaIngress = new k8s.networking.v1.Ingress(
   "authelia-ingress",
   {
@@ -338,7 +310,7 @@ export const autheliaIngress = new k8s.networking.v1.Ingress(
       namespace: autheliaNamespace.metadata.name,
       annotations: {
         "cert-manager.io/cluster-issuer": "letsencrypt-prod",
-        "nginx.ingress.kubernetes.io/ssl-redirect": "false", // Cloudflare tunnel
+        "nginx.ingress.kubernetes.io/ssl-redirect": "false",
       },
     },
     spec: {

@@ -35,7 +35,6 @@ Internet → Cloudflare Edge → Encrypted Tunnel → k3s Cluster → Your Apps
 - **cert-manager**: Automatic TLS certificates (Let's Encrypt)
 - **ingress-nginx**: HTTP(S) routing and load balancing
 - **External Secrets**: Sync secrets from Pulumi ESC/Vault/AWS
-- **Authelia**: Centralized authentication with SSO and MFA support
 
 ## Project Structure
 
@@ -85,30 +84,6 @@ const myApp = createMyApp(homelab);
 export const myAppUrl = myApp.url;
 ```
 
-### With Authentication
-
-Protect apps with forward authentication:
-
-```typescript
-const app = homelab.createExposedWebApp("secure-app", {
-  image: "my-image:latest",
-  domain: "secure-app.example.com",
-  port: 8080,
-  requireAuth: true,  // Enable Authelia forward authentication
-});
-```
-
-Features:
-- ✅ Single sign-on across all apps
-- ✅ GitHub/Google social login
-- ✅ Multi-factor authentication
-- ✅ Per-app access policies
-- ✅ No per-app configuration needed
-
-**Learn more**:
-- [How to: Use Forward Auth](./docs/howto/use-forward-auth.md) - Enable auth for apps
-- [How to: Manage Access Control](./docs/howto/manage-access-control.md) - Configure who can access what
-
 ## Adding Infrastructure
 
 Create new stack in `packages/stacks/my-stack/` following the `base-infra` pattern.
@@ -124,20 +99,9 @@ Or extend `packages/core/infrastructure/` for reusable modules.
 ## Requirements
 
 - Node.js >=24.0.0
-- npm (for workspace management)
 - k3s cluster (see `bootstrap/install-k3s.sh`)
 - Cloudflare account (for tunnel and DNS)
 - Pulumi account (for state management)
-
-## Installation
-
-```bash
-# Install dependencies
-npm install
-
-# Verify TypeScript compilation
-npm run type-check
-```
 
 ## License
 

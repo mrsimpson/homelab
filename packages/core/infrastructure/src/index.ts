@@ -17,4 +17,4 @@ export * from "./ingress-nginx";
 export * from "./external-secrets";
 export * from "./registry-secrets";
 export * from "./storage";
-export * from "./auth";
+export * from "./authelia";

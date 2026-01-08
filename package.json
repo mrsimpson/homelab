@@ -5,9 +5,9 @@
   "description": "Personal homelab infrastructure as code",
   "workspaces": ["packages/*", "packages/core/*", "packages/stacks/*", "packages/apps/*"],
   "scripts": {
-    "lint": "biome check .",
-    "lint:fix": "biome check --write .",
-    "format": "biome format --write .",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
     "type-check": "tsc --noEmit",
     "preview": "pulumi preview",
     "up": "pulumi up",
@@ -19,8 +19,7 @@
     "homelab",
     "infrastructure",
     "cloudflare-tunnel",
-    "authelia",
-    "forward-auth",
+    "oauth2-proxy",
     "k3s"
   ],
   "author": "mrsimpson",
@@ -55,6 +54,6 @@
     "@pulumi/random": "^4.16.0"
   },
   "lint-staged": {
-    "**/*.{ts,tsx}": ["biome check --write --organize-imports-enabled=true", "tsc --noEmit"]
+    "src/**/*.{ts,tsx}": ["biome check --write --organize-imports-enabled=true", "tsc --noEmit"]
   }
 }

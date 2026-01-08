@@ -1,5 +1,5 @@
 import * as k8s from "@pulumi/kubernetes";
-import type * as pulumi from "@pulumi/pulumi";
+import * as pulumi from "@pulumi/pulumi";
 
 /**
  * Helper functions for creating ImagePullSecrets for private container registries.
@@ -9,12 +9,12 @@ import type * as pulumi from "@pulumi/pulumi";
  */
 
 export interface CreateImagePullSecretArgs {
-  /** Namespace to create the secret in */
-  namespace: string;
-  /** ClusterSecretStore name (defaults to "pulumi-esc") */
-  storeName?: string;
-  /** External Secrets Operator to depend on (optional) */
-  dependsOn?: pulumi.Resource[];
+	/** Namespace to create the secret in */
+	namespace: string;
+	/** ClusterSecretStore name (defaults to "pulumi-esc") */
+	storeName?: string;
+	/** External Secrets Operator to depend on (optional) */
+	dependsOn?: pulumi.Resource[];
 }
 
 /**
@@ -52,53 +52,53 @@ export interface CreateImagePullSecretArgs {
  * @returns The created ExternalSecret resource
  */
 export function createGhcrImagePullSecret(
-  args: CreateImagePullSecretArgs
+	args: CreateImagePullSecretArgs,
 ): k8s.apiextensions.CustomResource {
-  const storeName = args.storeName || "pulumi-esc";
+	const storeName = args.storeName || "pulumi-esc";
 
-  return new k8s.apiextensions.CustomResource(
-    `ghcr-pull-secret-${args.namespace}`,
-    {
-      apiVersion: "external-secrets.io/v1beta1",
-      kind: "ExternalSecret",
-      metadata: {
-        name: "ghcr-pull-secret",
-        namespace: args.namespace,
-      },
-      spec: {
-        refreshInterval: "1h",
-        secretStoreRef: {
-          name: storeName,
-          kind: "ClusterSecretStore",
-        },
-        target: {
-          name: "ghcr-pull-secret",
-          creationPolicy: "Owner",
-          template: {
-            type: "kubernetes.io/dockerconfigjson",
-            data: {
-              ".dockerconfigjson": `{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
-            },
-          },
-        },
-        data: [
-          {
-            secretKey: "github_username",
-            remoteRef: {
-              key: "github-username",
-            },
-          },
-          {
-            secretKey: "github_token",
-            remoteRef: {
-              key: "github-token",
-            },
-          },
-        ],
-      },
-    },
-    { dependsOn: args.dependsOn }
-  );
+	return new k8s.apiextensions.CustomResource(
+		`ghcr-pull-secret-${args.namespace}`,
+		{
+			apiVersion: "external-secrets.io/v1beta1",
+			kind: "ExternalSecret",
+			metadata: {
+				name: "ghcr-pull-secret",
+				namespace: args.namespace,
+			},
+			spec: {
+				refreshInterval: "1h",
+				secretStoreRef: {
+					name: storeName,
+					kind: "ClusterSecretStore",
+				},
+				target: {
+					name: "ghcr-pull-secret",
+					creationPolicy: "Owner",
+					template: {
+						type: "kubernetes.io/dockerconfigjson",
+						data: {
+							".dockerconfigjson": `{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
+						},
+					},
+				},
+				data: [
+					{
+						secretKey: "github_username",
+						remoteRef: {
+							key: "github-username",
+						},
+					},
+					{
+						secretKey: "github_token",
+						remoteRef: {
+							key: "github-token",
+						},
+					},
+				],
+			},
+		},
+		{ dependsOn: args.dependsOn },
+	);
 }
 
 /**
@@ -115,32 +115,32 @@ export function createGhcrImagePullSecret(
  * @returns The created ExternalSecret resource
  */
 export function createDockerHubImagePullSecret(
-  args: CreateImagePullSecretArgs
+	args: CreateImagePullSecretArgs,
 ): k8s.apiextensions.CustomResource {
-  const storeName = args.storeName || "pulumi-esc";
+	const storeName = args.storeName || "pulumi-esc";
 
-  return new k8s.apiextensions.CustomResource(
-    `dockerhub-pull-secret-${args.namespace}`,
-    {
-      apiVersion: "external-secrets.io/v1beta1",
-      kind: "ExternalSecret",
-      metadata: {
-        name: "dockerhub-pull-secret",
-        namespace: args.namespace,
-      },
-      spec: {
-        refreshInterval: "1h",
-        secretStoreRef: {
-          name: storeName,
-          kind: "ClusterSecretStore",
-        },
-        target: {
-          name: "dockerhub-pull-secret",
-          creationPolicy: "Owner",
-          template: {
-            type: "kubernetes.io/dockerconfigjson",
-            data: {
-              ".dockerconfigjson": `{
+	return new k8s.apiextensions.CustomResource(
+		`dockerhub-pull-secret-${args.namespace}`,
+		{
+			apiVersion: "external-secrets.io/v1beta1",
+			kind: "ExternalSecret",
+			metadata: {
+				name: "dockerhub-pull-secret",
+				namespace: args.namespace,
+			},
+			spec: {
+				refreshInterval: "1h",
+				secretStoreRef: {
+					name: storeName,
+					kind: "ClusterSecretStore",
+				},
+				target: {
+					name: "dockerhub-pull-secret",
+					creationPolicy: "Owner",
+					template: {
+						type: "kubernetes.io/dockerconfigjson",
+						data: {
+							".dockerconfigjson": `{
   "auths": {
     "https://index.docker.io/v1/": {
       "username": "{{ .dockerhub_username }}",
@@ -149,25 +149,25 @@ export function createDockerHubImagePullSecret(
     }
   }
 }`,
-            },
-          },
-        },
-        data: [
-          {
-            secretKey: "dockerhub_username",
-            remoteRef: {
-              key: "dockerhub-credentials/username",
-            },
-          },
-          {
-            secretKey: "dockerhub_token",
-            remoteRef: {
-              key: "dockerhub-credentials/token",
-            },
-          },
-        ],
-      },
-    },
-    { dependsOn: args.dependsOn }
-  );
+						},
+					},
+				},
+				data: [
+					{
+						secretKey: "dockerhub_username",
+						remoteRef: {
+							key: "dockerhub-credentials/username",
+						},
+					},
+					{
+						secretKey: "dockerhub_token",
+						remoteRef: {
+							key: "dockerhub-credentials/token",
+						},
+					},
+				],
+			},
+		},
+		{ dependsOn: args.dependsOn },
+	);
 }

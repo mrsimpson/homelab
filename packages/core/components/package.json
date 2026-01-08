@@ -4,7 +4,11 @@
   "description": "Reusable Pulumi components for secure homelab infrastructure",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "files": ["src/", "README.md", "LICENSE"],
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",

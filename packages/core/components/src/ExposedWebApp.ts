@@ -50,6 +50,16 @@ import * as pulumi from "@pulumi/pulumi";
  *   });
  */
 
+/**
+ * Authentication type for ExposedWebApp
+ */
+export enum AuthType {
+  /** No authentication required */
+  NONE = "none",
+  /** Authelia forward authentication via nginx annotations */
+  FORWARD = "forward",
+}
+
 export interface StorageConfig {
   size: string;
   mountPath: string;
@@ -104,8 +114,8 @@ export interface ExposedWebAppArgs {
   replicas?: number;
   /** Environment variables */
   env?: Array<{ name: string; value: string | pulumi.Output<string> }>;
-  /** Enable forward authentication (requires ForwardAuthConfig in dependencies) */
-  requireAuth?: boolean;
+  /** Authentication type (defaults to "none") */
+  auth?: AuthType;
   /** Persistent storage configuration */
   storage?: StorageConfig;
   /** Resource requests and limits */
@@ -341,12 +351,14 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     }
 
     // Forward authentication (Authelia)
-    if (args.requireAuth && args.forwardAuth) {
-      const responseHeaders =
-        args.forwardAuth.responseHeaders || "Remote-User,Remote-Email,Remote-Groups";
-      ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] = args.forwardAuth.verifyUrl;
-      ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] = args.forwardAuth.signinUrl;
-      ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] = responseHeaders;
+    if (args.auth === AuthType.FORWARD) {
+      // Use default Authelia URLs for forward auth
+      ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] =
+        "http://authelia.authelia.svc.cluster.local:9091/api/verify";
+      ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] =
+        "https://auth.no-panic.org/?rm=$request_method&rd=$request_uri";
+      ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] =
+        "Remote-User,Remote-Email,Remote-Groups";
 
       // CRITICAL: Pass correct X-Forwarded-Proto to auth endpoint
       // nginx normally uses $scheme which is 'http' when Cloudflare connects via HTTP
@@ -369,7 +381,7 @@ proxy_set_header X-Original-Method $request_method;`;
     // Forward headers from proxy (Cloudflare, ingress controller)
     // This allows backends to know the real client IP, protocol (HTTPS), and host
     // Critical for Authelia to know requests are HTTPS and to generate correct redirect URLs
-    if (args.cloudflare || (args.requireAuth && args.forwardAuth)) {
+    if (args.cloudflare || args.auth === AuthType.FORWARD) {
       ingressAnnotations["nginx.ingress.kubernetes.io/use-forwarded-headers"] = "true";
       ingressAnnotations["nginx.ingress.kubernetes.io/compute-full-forwarded-for"] = "true";
     }

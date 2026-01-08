@@ -4,7 +4,7 @@
  * Reusable Pulumi components for homelab infrastructure
  */
 
-export { ExposedWebApp } from "./ExposedWebApp";
+export { ExposedWebApp, AuthType } from "./ExposedWebApp";
 export { HomelabContext } from "./homelab-context";
 export {
   createGhcrImagePullSecret,

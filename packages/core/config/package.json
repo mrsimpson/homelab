@@ -10,7 +10,12 @@
     "format": "biome format --write src/",
     "type-check": "tsc --noEmit"
   },
-  "keywords": ["pulumi", "homelab", "configuration", "infrastructure"],
+  "keywords": [
+    "pulumi",
+    "homelab",
+    "configuration",
+    "infrastructure"
+  ],
   "author": "mrsimpson",
   "license": "MIT",
   "repository": {

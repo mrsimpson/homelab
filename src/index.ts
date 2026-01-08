@@ -1,5 +1,3 @@
-import * as cloudflare from "@pulumi/cloudflare";
-import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 
 // Main entry point for homelab infrastructure
@@ -19,16 +17,30 @@ import {
   uncriticalStorageClass,
 } from "@mrsimpson/homelab-core-infrastructure";
 
-// Initialize base infrastructure and get the context (now includes namespaces)
+// Initialize base infrastructure and get the context
 const baseInfra = setupBaseInfra();
 export const homelab = baseInfra.context;
 
 // Deploy storage infrastructure
+// CRITICAL: Export Longhorn Helm release directly so Pulumi tracks it
+// Without this, Longhorn may not be deployed even though storage classes depend on it
 export const longhornStorage = longhorn;
+
+// Export storage classes - they depend on longhorn Helm release
+// This establishes the dependency chain: these classes depend on longhorn
 export const storageClasses = {
   persistent: persistentStorageClass, // For critical data with R2 backups
   uncritical: uncriticalStorageClass, // For non-critical data without backups
 };
+
+// Verify storage classes were created (helps ensure longhorn is deployed)
+pulumi
+  .all([persistentStorageClass.metadata.name, uncriticalStorageClass.metadata.name])
+  .apply(([persistentName, uncriticalName]) => {
+    pulumi.log.info(
+      `Storage classes exported: persistent=${persistentName}, uncritical=${uncriticalName}`
+    );
+  });
 
 // Log backup configuration status
 logBackupStatus();
@@ -36,12 +48,11 @@ logBackupStatus();
 // Export core infrastructure outputs for convenience
 export const tunnelId = baseInfra.cloudflare.tunnelId;
 export const tunnelCname = baseInfra.cloudflare.tunnelCname;
-// export const autheliaUrl = baseInfra.authelia.autheliaUrl; // TODO: Add this to base infra exports
 
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
-// import { createSecureDemo } from "@mrsimpson/homelab-app-secure-demo"; // Not available in this branch
+import { AuthType } from "@mrsimpson/homelab-core-components";
 
 const helloWorldApp = createHelloWorld(homelab);
 export const helloWorldUrl = helloWorldApp.url;
@@ -49,13 +60,10 @@ export const helloWorldUrl = helloWorldApp.url;
 const nodejsDemoApp = createNodejsDemo(homelab);
 export const nodejsDemoUrl = nodejsDemoApp.url;
 
-// const secureDemoApp = createSecureDemo(homelab); // Not available in this branch
-// export const secureDemoUrl = secureDemoApp.url;
-
 // Storage validator - simple nginx-based storage test with automatic R2 backups
 export const storageValidatorApp = homelab.createExposedWebApp("storage-validator", {
   image: "nginxinc/nginx-unprivileged:alpine",
-  domain: "storage-validator.local.mrsimpson.dev",
+  domain: "storage-validator.no-panic.org",
   port: 8080,
   storage: {
     size: "1Gi",
@@ -64,91 +72,28 @@ export const storageValidatorApp = homelab.createExposedWebApp("storage-validato
   },
   tags: ["storage", "validation", "persistent", "longhorn", "backup"],
 });
-export const storageValidatorUrl = "https://storage-validator.local.mrsimpson.dev";
+export const storageValidatorUrl = "https://storage-validator.no-panic.org";
+
+// Auth Demo App - Simple nginx app to test forward authentication
+export const authDemoApp = homelab.createExposedWebApp("auth-demo", {
+  image: "nginxinc/nginx-unprivileged:alpine",
+  domain: "auth-demo.no-panic.org",
+  port: 8080,
+  auth: AuthType.FORWARD, // 🔒 Protected by Authelia forward auth
+  tags: ["auth", "demo", "security", "authelia"],
+});
+export const authDemoUrl = "https://auth-demo.no-panic.org";
 
 // Longhorn UI - Management interface for storage system
-// Create basic auth secret for Longhorn UI protection
-const longhornBasicAuth = new k8s.core.v1.Secret(
-  "longhorn-basic-auth",
-  {
-    metadata: {
-      name: "longhorn-basic-auth",
-      namespace: "longhorn-system",
-    },
-    data: {
-      // Default: admin/longhorn123 (change in production)
-      // Generated with: echo -n 'admin:$apr1$V2K6rJ2k$6QjREMDJJeVwFCZB3bFn//' | base64
-      auth: "YWRtaW46JGFwcjEkVjJLNnJKMmskNlFqUkVNREpKZVZ3RkNaQjNiRm4vLw==",
-    },
-  },
-  { dependsOn: [longhornStorage] }
-);
+// Note: Using portforwarding instead of Ingress to avoid webhook validation race conditions
+// To access Longhorn UI:
+//   kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80
+// Then visit: http://localhost:8080
 
-// Create Cloudflare DNS record for Longhorn UI
-const longhornDNS = new cloudflare.Record("longhorn-dns", {
-  zoneId: "9007d8406ee5b613838ea52c3491e915", // mrsimpson.dev zone
-  name: "longhorn.local.mrsimpson.dev",
-  type: "CNAME",
-  content: tunnelCname,
-  comment: "Managed by Pulumi - Longhorn UI",
-  proxied: true,
-});
-
-// Create ingress for Longhorn UI with basic authentication
-const longhornIngress = new k8s.networking.v1.Ingress(
-  "longhorn-ui-ingress",
-  {
-    metadata: {
-      name: "longhorn-ui",
-      namespace: "longhorn-system",
-      annotations: {
-        "kubernetes.io/ingress.class": "nginx",
-        "cert-manager.io/cluster-issuer": "letsencrypt-prod",
-        "nginx.ingress.kubernetes.io/auth-type": "basic",
-        "nginx.ingress.kubernetes.io/auth-secret": "longhorn-basic-auth",
-        "nginx.ingress.kubernetes.io/auth-realm":
-          "Authentication Required - Longhorn Storage Management",
-        "nginx.ingress.kubernetes.io/ssl-redirect": "true",
-      },
-    },
-    spec: {
-      ingressClassName: "nginx",
-      tls: [
-        {
-          hosts: ["longhorn.local.mrsimpson.dev"],
-          secretName: "longhorn-ui-tls",
-        },
-      ],
-      rules: [
-        {
-          host: "longhorn.local.mrsimpson.dev",
-          http: {
-            paths: [
-              {
-                path: "/",
-                pathType: "Prefix",
-                backend: {
-                  service: {
-                    name: "longhorn-frontend",
-                    port: { number: 80 },
-                  },
-                },
-              },
-            ],
-          },
-        },
-      ],
-    },
-  },
-  {
-    dependsOn: [longhornStorage, longhornBasicAuth, longhornDNS],
-  }
-);
-
-export const longhornUIUrl = "https://longhorn.local.mrsimpson.dev";
-export const longhornUICredentials = "Username: admin | Password: longhorn123";
+export const longhornUIUrl = "http://localhost:8080 (via port-forward)";
+export const longhornUIPortForwardCommand =
+  "kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80";
 export const longhornUI = {
-  ingress: longhornIngress,
-  auth: longhornBasicAuth,
-  dns: longhornDNS,
+  accessMethod: "portforward",
+  command: "kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80",
 };

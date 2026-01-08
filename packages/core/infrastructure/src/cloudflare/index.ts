@@ -1,8 +1,9 @@
-import { homelabConfig } from "@mrsimpson/homelab-config";
+import * as pulumi from "@pulumi/pulumi";
 import * as cloudflare from "@pulumi/cloudflare";
 import * as k8s from "@pulumi/kubernetes";
-import * as pulumi from "@pulumi/pulumi";
 import * as random from "@pulumi/random";
+import { homelabConfig } from "@mrsimpson/homelab-config";
+import { ingressNginx } from "../ingress-nginx";
 
 /**
  * Cloudflare Tunnel - Secure ingress without port forwarding
@@ -36,7 +37,7 @@ export const tunnelToken = tunnel.tunnelToken;
 export const tunnelCname = tunnel.cname;
 
 // Deploy cloudflared in Kubernetes
-const cloudflaredNamespace = new k8s.core.v1.Namespace("cloudflare", {
+export const cloudflaredNamespace = new k8s.core.v1.Namespace("cloudflare", {
   metadata: {
     name: "cloudflare",
     labels: {
@@ -47,14 +48,52 @@ const cloudflaredNamespace = new k8s.core.v1.Namespace("cloudflare", {
   },
 });
 
+// Create a Service alias for ingress-nginx controller
+// This solves the problem of Helm generating dynamic service names
+// We create a simple Service that selects the ingress-nginx controller pods
+// and expose it as a predictable name that cloudflared can reference
+const ingressNginxAlias = new k8s.core.v1.Service(
+  "ingress-nginx-controller",
+  {
+    metadata: {
+      name: "ingress-nginx-controller",
+      namespace: "ingress-nginx",
+    },
+    spec: {
+      selector: {
+        "app.kubernetes.io/name": "ingress-nginx",
+        "app.kubernetes.io/component": "controller",
+      },
+      ports: [
+        {
+          name: "http",
+          port: 80,
+          targetPort: 80,
+          protocol: "TCP",
+        },
+        {
+          name: "https",
+          port: 443,
+          targetPort: 443,
+          protocol: "TCP",
+        },
+      ],
+      type: "ClusterIP",
+    },
+  },
+  {
+    dependsOn: [ingressNginx],
+  }
+);
+
 // Create tunnel configuration
-// This routes all traffic to the ingress-nginx controller
+// This routes all traffic to the ingress-nginx controller via our alias service
 const tunnelConfig = new k8s.core.v1.ConfigMap(
   "tunnel-config",
   {
     metadata: {
       name: "tunnel-config",
-      namespace: cloudflaredNamespace.metadata.name,
+      namespace: "cloudflare", // Use string directly, dependsOn ensures it exists
     },
     data: {
       "config.yaml": `tunnel: homelab-k3s
@@ -68,7 +107,7 @@ ingress:
     },
   },
   {
-    dependsOn: [cloudflaredNamespace],
+    dependsOn: [cloudflaredNamespace, ingressNginxAlias], // Depend on the alias service
   }
 );
 
@@ -78,7 +117,7 @@ const tunnelCredsSecret = new k8s.core.v1.Secret(
   {
     metadata: {
       name: "tunnel-credentials",
-      namespace: cloudflaredNamespace.metadata.name,
+      namespace: "cloudflare", // Use string directly, dependsOn ensures it exists
     },
     stringData: {
       "credentials.json": pulumi
@@ -93,7 +132,7 @@ const tunnelCredsSecret = new k8s.core.v1.Secret(
     },
   },
   {
-    dependsOn: [cloudflaredNamespace, tunnel],
+    dependsOn: [cloudflaredNamespace, tunnel], // CRITICAL: Explicit dependency on namespace resource
   }
 );
 
@@ -103,7 +142,7 @@ export const cloudflaredDeployment = new k8s.apps.v1.Deployment(
   {
     metadata: {
       name: "cloudflared",
-      namespace: cloudflaredNamespace.metadata.name,
+      namespace: "cloudflare", // Use string directly, dependsOn ensures it exists
     },
     spec: {
       replicas: 2, // HA setup
