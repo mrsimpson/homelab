@@ -484,7 +484,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] =
         "http://authelia.authelia.svc.cluster.local:9091/api/verify";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] =
-        "https://auth.no-panic.org/?rm=$request_method&rd=$request_uri";
+        "https://auth.no-panic.org/?rm=$request_method&rd=$scheme://$http_host$request_uri";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] =
         "Remote-User,Remote-Email,Remote-Groups";
 

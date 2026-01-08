@@ -1,4 +1,5 @@
 import * as k8s from "@pulumi/kubernetes";
+import * as cloudflare from "@pulumi/cloudflare";
 import * as pulumi from "@pulumi/pulumi";
 
 /**
@@ -124,17 +125,23 @@ identity_validation:
   });
 
 // Create users database
-const usersDatabase = pulumi.all([homelabConfig.require("domain")]).apply(
-  ([domain]) => `users:
-  admin:
+const usersDatabase = pulumi
+  .all([
+    homelabConfig.require("domain"),
+    homelabConfig.get("autheliaAdminUsername") || "admin",
+    homelabConfig.requireSecret("autheliaAdminPasswordHash"),
+  ])
+  .apply(
+    ([domain, adminUsername, passwordHash]) => `users:
+  ${adminUsername}:
     displayname: "Administrator"
-    password: "$argon2id$v=19$m=65536,t=3,p=4$Y1BGN1dMT3BLUko4b1ZjVA$9PrT/LgJT8H8wZFBzqyZJGgWXKPQGOXCqGgKNm0uqN8"  # changeme
-    email: admin@${domain}
+    password: "${passwordHash}"
+    email: ${adminUsername}@${domain}
     groups:
       - admins
       - dev
 `
-);
+  );
 
 // Create ConfigMap for Authelia configuration
 export const autheliaConfigMap = new k8s.core.v1.ConfigMap(
@@ -346,6 +353,25 @@ export const autheliaIngress = new k8s.networking.v1.Ingress(
   },
   {
     dependsOn: [autheliaService],
+  }
+);
+
+// Get tunnel CNAME from core infrastructure
+import { tunnelCname } from "../cloudflare";
+
+// Create Cloudflare DNS record for Authelia
+export const autheliaDnsRecord = new cloudflare.Record(
+  "authelia-dns",
+  {
+    zoneId: homelabConfig.require("cloudflareZoneId"),
+    name: pulumi.interpolate`auth.${homelabConfig.require("domain")}`,
+    type: "CNAME",
+    content: tunnelCname, // Use the actual Cloudflare tunnel hostname
+    proxied: true,
+    comment: "Managed by Pulumi - Authelia authentication",
+  },
+  {
+    dependsOn: [autheliaIngress],
   }
 );
 

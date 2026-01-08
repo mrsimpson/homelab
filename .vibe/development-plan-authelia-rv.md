@@ -83,9 +83,12 @@ Add proper authentication to the homelab stack, exploring options beyond the exi
 - [x] Fix Authelia deployment configuration based on working claude/homelab-auth-stack-lNC7I branch
 - [x] Add enableServiceLinks: false to prevent Kubernetes env var conflicts
 - [x] Fix configuration format and environment variable substitution
+- [x] Fix Authelia DNS record to use correct tunnel hostname (was hardcoded to tunnel.no-panic.org)
+- [x] Verify forward auth functionality - auth-demo.no-panic.org redirects to Authelia correctly
+- [x] Fix redirect URL to include full source URL instead of just path (nginx auth-signin annotation)
+- [x] Replace hardcoded credentials with Pulumi config (admin username and Argon2 hashed password)
 - [ ] Create initial Authelia configuration with GitHub/Google OAuth
 - [ ] Implement OIDC client configuration for Supabase compatibility
-- [ ] Add forward auth testing with existing nginx setup
 - [ ] Create Supabase OIDC integration test
 - [ ] Update documentation and examples
 
@@ -100,6 +103,10 @@ Add proper authentication to the homelab stack, exploring options beyond the exi
 - [x] **v4.38.0 Configuration**: Fixed all deprecated config keys, added required encryption_key and notifier
 - [x] **Pulumi Config Integration**: Authelia uses homelab:domain and authelia: secrets from Pulumi config
 - [x] **Secrets Generation Script**: Created setup-authelia-secrets.sh to generate and store secure secrets
+- [x] **DNS Record Fix**: Fixed Authelia DNS record to use actual tunnel CNAME instead of hardcoded tunnel.no-panic.org
+- [x] **Forward Auth Verification**: Confirmed auth-demo.no-panic.org correctly redirects to auth.no-panic.org for authentication
+- [x] **Redirect URL Fix**: Fixed nginx auth-signin annotation to include full source URL ($scheme://$http_host$request_uri) instead of just path
+- [x] **Secure Credentials**: Replaced hardcoded admin/changeme with Pulumi config using Argon2 hashed password
 
 ## Commit
 ### Phase Entrance Criteria:
@@ -312,6 +319,11 @@ identity_providers:
 4. **Infrastructure Pattern** - Authelia as infrastructure module (like cert-manager), not component
 5. **Clean Enum API** - `auth: "none" | "forward" | "sidecar"` for ExposedWebApp authentication choice
 6. **Singleton Service** - One Authelia instance serves entire homelab, not per-app deployment
+
+### Implementation Phase Decisions:
+1. **DNS Record Integration** - Fixed Authelia to use tunnelCname from core infrastructure instead of hardcoded tunnel hostname
+2. **Forward Auth Validation** - Successfully verified nginx forward auth annotations work with auth-demo app redirecting to Authelia
+3. **Infrastructure Dependencies** - Confirmed proper dependency chain between Cloudflare tunnel, Authelia deployment, and DNS record creation
 
 ## Notes
 - User mentioned previous Claude discussion that "jumped to conclusions too fast"
