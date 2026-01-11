@@ -478,16 +478,31 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       ingressAnnotations["nginx.ingress.kubernetes.io/ssl-redirect"] = "true";
     }
 
-    // Forward authentication (Authelia) - Using official v4.38.0 method
+    // Forward authentication (Authelia) - Official nginx ingress method
     if (args.auth === AuthType.FORWARD) {
-      // Use the correct v4.38.0 authz endpoint (not legacy /api/verify)
+      // Official annotations from Authelia documentation
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-method"] = "GET";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] =
         "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] =
-        "https://auth.no-panic.org?rm=$request_method&rd=$scheme://$http_host$request_uri";
+        "https://auth.no-panic.org?rm=$request_method&rd=$request_uri";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] =
         "Remote-User,Remote-Name,Remote-Groups,Remote-Email";
+
+      // Force nginx to use proper scheme detection
+      ingressAnnotations["nginx.ingress.kubernetes.io/proxy-set-headers"] =
+        "ingress-nginx/custom-headers";
+
+      // Configuration to ensure proper headers are sent to backend after auth
+      ingressAnnotations["nginx.ingress.kubernetes.io/configuration-snippet"] = `
+        auth_request_set $user $upstream_http_remote_user;
+        auth_request_set $groups $upstream_http_remote_groups;
+        auth_request_set $name $upstream_http_remote_name;
+        auth_request_set $email $upstream_http_remote_email;
+        proxy_set_header Remote-User $user;
+        proxy_set_header Remote-Groups $groups;
+        proxy_set_header Remote-Name $name;
+        proxy_set_header Remote-Email $email;`;
     }
 
     // Forward headers from proxy (Cloudflare, ingress controller)

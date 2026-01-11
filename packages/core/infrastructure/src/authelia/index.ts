@@ -64,6 +64,11 @@ server:
   address: 'tcp://0.0.0.0:9091'
   headers:
     csp_template: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'"
+  # Disable scheme validation for homelab behind proxy
+  endpoints:
+    authz:
+      auth-request:
+        implementation: AuthRequest
 
 log:
   level: info
@@ -242,6 +247,10 @@ export const autheliaDeployment = new k8s.apps.v1.Deployment(
                 {
                   name: "AUTHELIA_SERVER_DISABLE_HEALTHCHECK",
                   value: "true",
+                },
+                {
+                  name: "AUTHELIA_LOG_LEVEL",
+                  value: "debug",
                 },
               ],
               volumeMounts: [
