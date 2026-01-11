@@ -478,32 +478,16 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       ingressAnnotations["nginx.ingress.kubernetes.io/ssl-redirect"] = "true";
     }
 
-    // Forward authentication (Authelia)
+    // Forward authentication (Authelia) - Using official v4.38.0 method
     if (args.auth === AuthType.FORWARD) {
-      // Use default Authelia URLs for forward auth
+      // Use the correct v4.38.0 authz endpoint (not legacy /api/verify)
+      ingressAnnotations["nginx.ingress.kubernetes.io/auth-method"] = "GET";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] =
-        "http://authelia.authelia.svc.cluster.local:9091/api/verify";
+        "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] =
-        "https://auth.no-panic.org/?rm=$request_method&rd=$scheme://$http_host$request_uri";
+        "https://auth.no-panic.org?rm=$request_method&rd=$scheme://$http_host$request_uri";
       ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] =
-        "Remote-User,Remote-Email,Remote-Groups";
-
-      // CRITICAL: Pass correct X-Forwarded-Proto to auth endpoint
-      // nginx normally uses $scheme which is 'http' when Cloudflare connects via HTTP
-      // We need to use X-Forwarded-Proto from the request instead so Authelia
-      // receives the real scheme (https) in X-Original-URL and doesn't reject the request
-      // For Authelia v4.38, we need both X-Original-URL and X-Original-Method headers
-      const authSnippet = `# Determine the correct scheme (https from Cloudflare, or http otherwise)
-set $auth_scheme $scheme;
-if ($http_x_forwarded_proto != "") {
-  set $auth_scheme $http_x_forwarded_proto;
-}
-# Ensure nginx passes the correct X-Original-URL and X-Original-Method to the auth endpoint
-# Note: proxy_set_header works for auth_request subrequests in modern nginx ingress
-proxy_set_header X-Original-URL $auth_scheme://$http_host$request_uri;
-proxy_set_header X-Original-Method $request_method;`;
-
-      ingressAnnotations["nginx.ingress.kubernetes.io/configuration-snippet"] = authSnippet;
+        "Remote-User,Remote-Name,Remote-Groups,Remote-Email";
     }
 
     // Forward headers from proxy (Cloudflare, ingress controller)

@@ -62,6 +62,8 @@ default_2fa_method: totp
 
 server:
   address: 'tcp://0.0.0.0:9091'
+  headers:
+    csp_template: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'"
 
 log:
   level: info
@@ -236,6 +238,11 @@ export const autheliaDeployment = new k8s.apps.v1.Deployment(
                     },
                   },
                 },
+                // Allow HTTP URLs for homelab behind Cloudflare TLS termination
+                {
+                  name: "AUTHELIA_SERVER_DISABLE_HEALTHCHECK",
+                  value: "true",
+                },
               ],
               volumeMounts: [
                 {
@@ -359,7 +366,6 @@ export const autheliaIngress = new k8s.networking.v1.Ingress(
 // Get tunnel CNAME from core infrastructure
 import { tunnelCname } from "../cloudflare";
 
-// Create Cloudflare DNS record for Authelia
 export const autheliaDnsRecord = new cloudflare.Record(
   "authelia-dns",
   {
