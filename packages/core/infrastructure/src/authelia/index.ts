@@ -367,57 +367,6 @@ export const autheliaHTTPRoute = new k8s.apiextensions.CustomResource(
   }
 );
 
-// Create legacy Ingress for backward compatibility (disabled by default)
-// Note: This can be removed after Gateway API is confirmed working
-export const autheliaIngress = new k8s.networking.v1.Ingress(
-  "authelia-ingress",
-  {
-    metadata: {
-      name: "authelia-legacy",
-      namespace: autheliaNamespace.metadata.name,
-      annotations: {
-        "cert-manager.io/cluster-issuer": "letsencrypt-prod",
-        "nginx.ingress.kubernetes.io/ssl-redirect": "false",
-        // Disable this ingress - Gateway API is primary
-        "nginx.ingress.kubernetes.io/server-alias": "_disabled_",
-      },
-    },
-    spec: {
-      ingressClassName: "nginx-disabled", // Use non-existent class to disable
-      tls: [
-        {
-          hosts: [pulumi.interpolate`auth.${homelabConfig.require("domain")}`],
-          secretName: "authelia-legacy-tls",
-        },
-      ],
-      rules: [
-        {
-          host: pulumi.interpolate`auth-legacy.${homelabConfig.require("domain")}`, // Use different hostname
-          http: {
-            paths: [
-              {
-                path: "/",
-                pathType: "Prefix",
-                backend: {
-                  service: {
-                    name: autheliaService.metadata.name,
-                    port: {
-                      number: 9091,
-                    },
-                  },
-                },
-              },
-            ],
-          },
-        },
-      ],
-    },
-  },
-  {
-    dependsOn: [autheliaService],
-  }
-);
-
 // Get tunnel CNAME from core infrastructure
 import { tunnelCname } from "../cloudflare";
 
