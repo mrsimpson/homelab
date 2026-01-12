@@ -212,15 +212,16 @@ Or use system upgrade controller for automated upgrades.
 ```bash
 curl -sfL https://get.k3s.io | sh -s - \
   --write-kubeconfig-mode 644 \    # Make kubeconfig readable
-  --disable traefik                # We use ingress-nginx instead
+  --disable traefik                # We use Traefik Gateway API via Helm instead
 ```
 
-### Why Disable Traefik?
+### Why Disable Built-in Traefik?
 
-k3s includes Traefik by default, but we use ingress-nginx:
-- More widely used (better documentation)
-- Better Pulumi integration
-- Consistent with production Kubernetes setups
+k3s includes Traefik by default, but we use Traefik Gateway API via Helm:
+- Built-in Traefik lacks Gateway API support
+- Helm deployment provides Gateway API v1.4.0 conformance
+- Better integration with cert-manager and ForwardAuth middleware
+- Resolves HTTP scheme compatibility with Authelia v4.38.0
 
 ## Future Possibilities
 
