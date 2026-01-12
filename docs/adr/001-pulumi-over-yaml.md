@@ -1,6 +1,6 @@
 # ADR 001: Pulumi with TypeScript over YAML-based IaC
 
-**Status:** Accepted
+**Status:** Implemented
 **Date:** 2025-12-21
 **Deciders:** Project maintainers
 
