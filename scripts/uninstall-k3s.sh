@@ -113,9 +113,25 @@ for cert in "${ETCD_CERTS[@]}"; do
     fi
 done
 
-# Backup server token
-log_info "Backing up server token..."
-if [ -f "$K3S_DATA_DIR/server/token" ]; then
+# Backup k3s config file (contains token configuration - this is the source of truth)
+log_info "Backing up k3s config file..."
+if [ -f "$K3S_CONFIG_DIR/config.yaml" ]; then
+    mkdir -p "$BACKUP_DIR/config"
+    cp -v "$K3S_CONFIG_DIR/config.yaml" "$BACKUP_DIR/config/" 2>/dev/null || true
+    log_success "Backed up: config.yaml"
+
+    # Extract token from config.yaml and save to server/token backup for compatibility
+    log_info "Extracting token from config.yaml..."
+    mkdir -p "$BACKUP_DIR/server"
+    TOKEN_VALUE=$(grep "^token:" "$K3S_CONFIG_DIR/config.yaml" | sed 's/^token: "\?\(.*\)"\?$/\1/' | tr -d '"')
+    if [ -n "$TOKEN_VALUE" ]; then
+        echo "$TOKEN_VALUE" > "$BACKUP_DIR/server/token"
+        chmod 600 "$BACKUP_DIR/server/token"
+        log_success "Backed up: server token (extracted from config.yaml)"
+    fi
+elif [ -f "$K3S_DATA_DIR/server/token" ]; then
+    # Fallback: if no config.yaml, backup the token file directly (old installations)
+    log_info "Backing up server token (fallback - no config.yaml found)..."
     mkdir -p "$BACKUP_DIR/server"
     cp -v "$K3S_DATA_DIR/server/token" "$BACKUP_DIR/server/" 2>/dev/null || true
     log_success "Backed up: server token"

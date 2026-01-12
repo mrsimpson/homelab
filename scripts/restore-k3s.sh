@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Disable job control messages to suppress "Killed" notifications
+set +m
+
 # Color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -72,22 +75,48 @@ if [[ ! $CONFIRM =~ ^[Yy][Ee][Ss]$ ]]; then
 fi
 echo
 
-# Step 1: Stop K3s
-log_info "Step 1/5: Stopping K3s..."
-systemctl stop k3s 2>/dev/null || true
-sleep 3
-log_success "K3s stopped"
+# Step 1: Stop and disable K3s to prevent auto-restart
+log_info "Step 1/6: Stopping and disabling K3s (prevents auto-restart)..."
+
+# Temporarily disable exit-on-error for this section
+set +e
+systemctl stop k3s >/dev/null 2>&1
+systemctl disable k3s >/dev/null 2>&1
+set -e
+
+# Wait for processes to stop
+log_info "Waiting for k3s to stop..."
+sleep 5
+
+# Verify k3s is stopped
+set +e
+# Check for k3s server process specifically (not just any process with k3s in name)
+if pgrep -f "^/usr/local/bin/k3s server" >/dev/null 2>&1; then
+    log_error "K3s server process is still running after stop command"
+    log_error "Please manually run: sudo systemctl stop k3s && sudo pkill -9 k3s"
+    log_error "Then run this script again"
+    exit 1
+fi
+set -e
+
+log_success "K3s stopped and disabled"
 echo
 
-# Step 2: Clean database
-log_info "Step 2/5: Cleaning database (will be recreated with restored credentials)..."
+# Step 2: Clean database and all encrypted state
+log_info "Step 2/6: Cleaning database and encrypted state (will be recreated with restored credentials)..."
+# The key issue: encrypted bootstrap data is stored in these directories
+# We must remove them completely before restoring the token
 rm -rf "$K3S_DATA_DIR/server/db" 2>/dev/null || true
 rm -rf "$K3S_DATA_DIR/server/cred" 2>/dev/null || true
-log_success "Database cleaned"
+rm -rf "$K3S_DATA_DIR/server/etc" 2>/dev/null || true
+# Also clean any leftover state files
+rm -f "$K3S_DATA_DIR/server/.lock" 2>/dev/null || true
+log_success "Database and encrypted state cleaned"
+log_info "Cleaned: db/, cred/, etc/ directories"
 echo
 
 # Step 3: Restore certificates and credentials
-log_info "Step 3/5: Restoring certificates and credentials..."
+log_info "Step 3/6: Restoring certificates and credentials..."
 
 # Restore server TLS certificates
 if [ -d "$BACKUP_DIR/server/tls" ]; then
@@ -139,8 +168,9 @@ fi
 
 echo
 
-# Step 4: Start K3s
-log_info "Step 4/5: Starting K3s..."
+# Step 4: Re-enable and start K3s
+log_info "Step 4/6: Re-enabling and starting K3s..."
+systemctl enable k3s 2>/dev/null || true
 systemctl start k3s
 sleep 5
 
@@ -162,7 +192,7 @@ log_success "K3s is ready"
 echo
 
 # Step 5: Restore kubeconfig
-log_info "Step 5/5: Restoring kubeconfig..."
+log_info "Step 5/6: Restoring kubeconfig..."
 
 # Restore k3s.yaml (master kubeconfig)
 if [ -f "$BACKUP_DIR/kubeconfigs/k3s.yaml" ]; then
@@ -192,7 +222,9 @@ fi
 
 echo
 
-# Verification
+# Step 6: Final verification
+log_info "Step 6/6: Verifying restoration..."
+echo
 log_info "Verification:"
 kubectl version --short 2>/dev/null || kubectl version 2>/dev/null || true
 echo
