@@ -102,26 +102,6 @@ We will adopt **Traefik Proxy with Gateway API** as our ingress controller, repl
 - **Status**: Rejected
 - **Reasoning**: Focused on network policies rather than application authentication, no clear Authelia integration path
 
-## Implementation Plan
-
-### Phase 1: Setup (Week 1)
-1. Install Gateway API v1.2.1 CRDs (✅ completed)
-2. Deploy Traefik with Gateway API provider enabled
-3. Create GatewayClass and Gateway resources
-4. Configure ForwardAuth middleware for Authelia
-
-### Phase 2: Migration (Week 2-3)
-1. Extend ExposedWebApp component with Gateway API support
-2. Migrate test applications to validate authentication flow
-3. Parallel operation with nginx ingress for safety
-4. Update monitoring and alerting for Traefik
-
-### Phase 3: Completion (Week 4)
-1. Migrate remaining applications
-2. Remove nginx ingress controller
-3. Update documentation and runbooks
-4. Performance validation and optimization
-
 ## References
 
 - [Gateway API Implementations Comparison](https://gateway-api.sigs.k8s.io/implementations/)

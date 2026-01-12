@@ -1,6 +1,6 @@
 # ADR 011: Centralized Authentication Stack with Forward Auth
 
-**Status:** Implemented ✅ **MIGRATED TO TRAEFIK GATEWAY API**
+**Status:** Implemented
 **Date:** 2025-12-31
 **Implemented:** 2026-01-05  
 **Migrated:** 2026-01-12
@@ -125,122 +125,6 @@ spec:
 - ❌ No MFA built-in
 - ❌ Limited policy engine
 
-## Implementation Strategy
-
-### Phase 1: Core Authelia Deployment (2-3 hours)
-
-**1.1 Create Authelia Pulumi Component**
-```typescript
-// packages/core/infrastructure/src/auth/authelia.ts
-- Deploy Authelia Helm chart
-- Configure Redis/PostgreSQL backend for sessions
-- Set up GitHub/Google OAuth federation
-- Create ClusterSecretStore integration for credentials
-```
-
-**1.2 Deploy Authelia Service**
-```typescript
-- Namespace: auth-system
-- Storage: PostgreSQL on Longhorn PVC (session data)
-- Ingress: auth.{domain} (Cloudflare Tunnel + cert-manager)
-- Configuration: ConfigMap managed by Pulumi
-```
-
-**1.3 Configure OAuth Providers**
-```bash
-# GitHub OAuth App
-- Homepage URL: https://auth.{domain}
-- Callback URL: https://auth.{domain}/api/oidc/callback
-
-# Google OAuth Client
-- Authorized redirect URIs: https://auth.{domain}/api/oidc/callback
-```
-
-### Phase 2: Update ExposedWebApp Component (1-2 hours)
-
-**2.1 Add Forward-Auth Option**
-```typescript
-interface ExposedWebAppArgs {
-  requireAuth?: boolean | {
-    policy?: "bypass" | "one_factor" | "two_factor"
-    allowedUsers?: string[]
-    allowedGroups?: string[]
-  }
-  // Note: Now creates HTTPRoute with ForwardAuth middleware instead of Ingress
-}
-```
-
-**2.2 Apply ForwardAuth Middleware**
-```typescript
-if (args.requireAuth) {
-  // Creates ForwardAuth middleware and references it in HTTPRoute
-  const middleware = new k8s.apiextensions.CustomResource("forwardauth", {
-    apiVersion: "traefik.io/v1alpha1",
-    kind: "Middleware",
-    spec: {
-      forwardAuth: {
-        address: authConfig.verifyUrl,
-        authRequestHeaders: ["X-Original-URL", "X-Original-Method", /* ... */],
-        authResponseHeaders: ["Remote-User", "Remote-Email", "Remote-Groups"],
-      }
-    }
-  });
-}
-```
-
-### Phase 3: Supabase OIDC Integration (1 hour)
-
-**3.1 Configure Authelia as OIDC Provider**
-```yaml
-# Authelia configuration
-identity_providers:
-  oidc:
-    clients:
-      - id: supabase
-        description: Supabase Authentication
-        secret: ${SUPABASE_OIDC_SECRET}
-        redirect_uris:
-          - https://supabase.{domain}/auth/v1/callback
-        scopes:
-          - openid
-          - email
-          - profile
-```
-
-**3.2 Configure Supabase**
-```env
-# Supabase .env
-GOTRUE_EXTERNAL_AUTHELIA_ENABLED=true
-GOTRUE_EXTERNAL_AUTHELIA_CLIENT_ID=supabase
-GOTRUE_EXTERNAL_AUTHELIA_SECRET=***
-GOTRUE_EXTERNAL_AUTHELIA_URL=https://auth.{domain}
-```
-
-### Phase 4: Access Policies (30 minutes)
-
-**4.1 Define Access Rules**
-```yaml
-# Authelia ACL configuration
-access_control:
-  default_policy: deny
-  rules:
-    # Public apps
-    - domain: "hello-world.{domain}"
-      policy: one_factor
-
-    # Admin apps (MFA required)
-    - domain: "longhorn.{domain}"
-      policy: two_factor
-      subject:
-        - "user:admin@example.com"
-
-    # Team apps
-    - domain: "*.{domain}"
-      policy: one_factor
-      subject:
-        - "group:homelab-users"
-```
-
 ## Consequences
 
 ### Positive
@@ -286,101 +170,6 @@ access_control:
 3. **Storage Requirement** - ~5-10GB for PostgreSQL session backend
 4. **External OAuth Setup** - One-time GitHub/Google OAuth app creation
 
-## Migration Plan
-
-### Week 1: Infrastructure Setup ✅ COMPLETED
-- [x] Deploy Authelia via Pulumi
-- [x] Configure PostgreSQL session backend
-- [x] Set up GitHub/Google OAuth federation (prepared, awaiting OAuth app setup)
-- [x] Create `auth.{domain}` ingress with TLS
-- [x] Validate Authelia login flow works (verified with test admin user)
-
-### Week 2: Component Refactor ✅ COMPLETED (Partial)
-- [x] Update ExposedWebApp component with `requireAuth` option
-- [x] Add forward-auth annotation logic
-- [x] Add automatic forwarded headers configuration for HTTPS support
-- [ ] Remove oauth2-proxy sidecar code (future when deprecating old apps)
-- [ ] Create access policy configuration patterns (started, will expand)
-- [ ] Update documentation and examples
-
-### Week 3: Application Migration ⏳ IN PROGRESS
-- [x] Secure-demo app configured with forward authentication
-- [ ] Migrate Longhorn UI with MFA policy
-- [ ] Migrate remaining OSS apps
-- [x] Validate SSO flow (basic forward-auth working)
-- [ ] Remove old OAuth secrets from Pulumi ESC
-
-### Week 4: Supabase Integration ⏳ NOT STARTED
-- [ ] Deploy Supabase stack
-- [ ] Configure Authelia OIDC client
-- [ ] Configure Supabase OIDC provider
-- [ ] Test end-to-end authentication flow
-- [ ] Document Supabase setup procedure
-
-## Success Criteria
-
-- [x] Authelia deployed and accessible at `auth.{domain}` ✅
-- [ ] GitHub/Google authentication working (configured, awaiting OAuth app registration)
-- [x] At least 1 app protected with forward-auth (secure-demo) ✅
-- [x] SSO flow enabled (authentication redirects working) ✅
-- [x] Per-app access policies functional (basic forward-auth) ✅
-- [ ] Supabase OIDC integration complete (future phase)
-- [ ] MFA working for admin apps (configured in Authelia, deployment pending)
-- [ ] Old oauth2-proxy sidecars removed (future when deprecating legacy apps)
-- [x] Documentation updated (ADR 011, component code, deployment notes) ✅
-- [x] Zero increase in authentication failures ✅
-
-### Implementation Notes (Updated 2026-01-05)
-
-**Core Stack Deployment:** ✅ **OPERATIONAL**
-- ✅ PostgreSQL 16 backend deployed with Longhorn persistent storage (1Gi, daily R2 backups)
-- ✅ Authelia 4.38 deployed with 2 replicas for HA (both running, 1/1 Ready each)
-- ✅ PostgreSQL authentication verified (password embedded in ConfigMap, "Startup complete" logged)
-- ✅ Test admin user created (admin/testpassword123) for initial verification
-- ✅ Authelia web interface operational, API endpoints responding
-- ✅ ConfigMap recovered from corruption incident (full configuration restored)
-
-**HTTPS/Proxy Integration:** ✅ **VERIFIED WITH TRAEFIK GATEWAY API**
-- ✅ Fixed X-Forwarded-Proto header propagation through Cloudflare tunnel
-- ✅ Traefik Gateway API configured to trust proxy headers from Cloudflare
-- ✅ ExposedWebApp component updated for Gateway API HTTPRoute with ForwardAuth middleware
-- ✅ HTTP scheme compatibility issue RESOLVED - Authelia receives HTTPS URLs
-- ✅ TLS certificate for auth.no-panic.org provisioned via cert-manager
-
-**Deployment Status:** ✅ **READY FOR NEXT PHASE**
-- All infrastructure components: Healthy and stable
-- Infrastructure-as-code: Fully codified in Pulumi (no manual patches required)
-- Storage: Enterprise-grade with automated daily R2 backups (7-day retention)
-- High Availability: 2-replica deployment with session state in PostgreSQL
-
-**Remaining Work:**
-1. OAuth provider configuration (GitHub/Google apps) - requires external setup
-2. Full access policy implementation with groups/roles
-3. MFA enforcement and additional identity providers
-4. Supabase OIDC integration (separate phase)
-5. Remaining application migrations to forward-auth pattern
-6. User management improvements (LDAP, additional local users)
-
-## Follow-up Actions
-
-### Immediate (Post-Implementation)
-1. Set up monitoring and alerting for Authelia availability
-2. Document ACL policy patterns for common scenarios
-3. Create user onboarding procedure (GitHub/Google account setup)
-4. Implement Authelia session backup to R2
-
-### Short-Term (1-3 months)
-1. Add local user backend as fallback for external IdP outages
-2. Implement MFA enforcement for all users
-3. Set up authentication metrics dashboard
-4. Create disaster recovery runbook
-
-### Long-Term (3-6 months)
-1. Evaluate migration to Authentik if UI management becomes priority
-2. Add additional identity providers (Microsoft, generic OIDC)
-3. Implement group synchronization from GitHub organizations
-4. Consider hardware security key support (WebAuthn)
-
 ## Migration to Traefik Gateway API (2026-01-12)
 
 ### Background
@@ -399,11 +188,25 @@ Migrated from nginx ingress controller to **Traefik Gateway API** with ForwardAu
 3. **Headers**: Required `X-Original-URL` and `X-Original-Method` headers configured
 4. **Standards**: Using official Kubernetes Gateway API v1.4.0
 
-### Migration Status
-- ✅ **Completed**: January 12, 2026
-- ✅ **Validated**: All authentication flows working correctly  
-- ✅ **Production**: Zero-downtime migration successful
+### Key Technical Fix
+The critical fix was adding `RequestHeaderModifier` to HTTPRoute filters:
+```yaml
+filters:
+  - type: RequestHeaderModifier
+    requestHeaderModifier:
+      set:
+        - name: X-Original-URL
+          value: https://auth-demo.no-panic.org
+        - name: X-Original-Method
+          value: GET
+  - type: ExtensionRef
+    extensionRef:
+      group: traefik.io
+      kind: Middleware
+      name: auth-demo-forwardauth
+```
 
+This ensures Authelia receives the required HTTPS URLs, resolving the HTTP scheme compatibility issue.
 ---
 
 ## References

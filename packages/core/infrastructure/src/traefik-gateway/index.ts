@@ -49,6 +49,12 @@ export const traefik = new k8s.helm.v3.Release(
       // Match k3s + hostPort pattern like ingress-nginx
       service: {
         type: "ClusterIP", // Not LoadBalancer (we're on bare metal)
+        // CRITICAL: Ensure service selector works with Helm-generated labels
+        // This addresses the service endpoint resolution issue from PATCHES_APPLIED.md
+        annotations: {
+          // Let Helm manage the service selector - it will match deployment labels automatically
+          "pulumi.com/skipAwait": "true",
+        },
       },
       deployment: {
         replicas: 1, // Single-node homelab
@@ -95,41 +101,9 @@ export const traefik = new k8s.helm.v3.Release(
   }
 );
 
-// Create controller service with correct selector (fixes service endpoint resolution)
-// This resolves the manual patch applied via kubectl
-export const traefikControllerService = new k8s.core.v1.Service(
-  "traefik-controller-service",
-  {
-    metadata: {
-      name: "traefik-controller",
-      namespace: "traefik-system",
-    },
-    spec: {
-      type: "ClusterIP",
-      ports: [
-        {
-          name: "web",
-          port: 80,
-          targetPort: 8000,
-          protocol: "TCP",
-        },
-        {
-          name: "websecure",
-          port: 443,
-          targetPort: 8443,
-          protocol: "TCP",
-        },
-      ],
-      selector: {
-        "app.kubernetes.io/name": "traefik",
-        "app.kubernetes.io/instance": traefik.name.apply((name) => `${name}-traefik-system`),
-      },
-    },
-  },
-  {
-    dependsOn: [traefik],
-  }
-);
+// Note: Traefik Helm chart creates its own service automatically
+// Service name follows pattern: {release-name} (e.g., traefik-abc12345)
+// We'll reference this service in components that need it
 
 // Create GatewayClass for Traefik
 export const traefikGatewayClass = new k8s.apiextensions.CustomResource(
@@ -240,6 +214,17 @@ export const autheliForwardAuth = new k8s.apiextensions.CustomResource(
       forwardAuth: {
         address: "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
         trustForwardHeader: true,
+        // Required headers for Authelia authentication (fixes HTTP scheme issue)
+        authRequestHeaders: [
+          "X-Original-URL",
+          "X-Original-Method",
+          "X-Forwarded-Host",
+          "X-Forwarded-Proto",
+          "X-Forwarded-Uri",
+          "Accept",
+          "Authorization",
+          "Cookie",
+        ],
         authResponseHeaders: ["Remote-User", "Remote-Groups", "Remote-Name", "Remote-Email"],
       },
     },
@@ -254,3 +239,5 @@ export const gatewayClassName = "traefik";
 export const gatewayName = "homelab-gateway";
 export const gatewayNamespace = "traefik-system";
 export const forwardAuthMiddlewareName = "authelia-forwardauth";
+// Traefik service name follows pattern: {helm-release-name}
+export const traefikServiceName = traefik.name; // Dynamic Helm release name

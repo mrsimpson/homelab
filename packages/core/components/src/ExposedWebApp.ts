@@ -515,12 +515,29 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     // Add ForwardAuth middleware for authentication
     if (args.auth === AuthType.FORWARD && this.forwardAuthMiddleware) {
       httpRouteSpec.rules[0].filters = [
+        // CRITICAL: Add headers required by Authelia before ForwardAuth middleware
+        {
+          type: "RequestHeaderModifier",
+          requestHeaderModifier: {
+            set: [
+              {
+                name: "X-Original-URL",
+                value: `https://${args.domain}`,
+              },
+              {
+                name: "X-Original-Method",
+                value: "GET",
+              },
+            ],
+          },
+        },
+        // Then apply ForwardAuth middleware
         {
           type: "ExtensionRef",
           extensionRef: {
             group: "traefik.io",
             kind: "Middleware",
-            name: this.forwardAuthMiddleware.metadata.name,
+            name: this.forwardAuthMiddleware?.metadata.name || "auth-demo-forwardauth",
           },
         },
       ];

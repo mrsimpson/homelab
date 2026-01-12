@@ -63,7 +63,7 @@ const traefikAlias = new k8s.core.v1.Service(
     spec: {
       selector: {
         "app.kubernetes.io/name": "traefik",
-        "app.kubernetes.io/instance": "traefik",
+        "app.kubernetes.io/instance": traefik.name.apply((name) => `${name}-traefik-system`),
       },
       ports: [
         {
