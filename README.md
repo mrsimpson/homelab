@@ -33,7 +33,7 @@ Internet → Cloudflare Edge → Encrypted Tunnel → k3s Cluster → Your Apps
 **Key Components:**
 - **Cloudflare Tunnel**: Secure internet exposure without open ports
 - **cert-manager**: Automatic TLS certificates (Let's Encrypt)
-- **ingress-nginx**: HTTP(S) routing and load balancing
+- **Traefik Gateway API**: HTTP(S) routing and load balancing with ForwardAuth
 - **External Secrets**: Sync secrets from Pulumi ESC/Vault/AWS
 
 ## Project Structure

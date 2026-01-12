@@ -324,29 +324,75 @@ export const autheliaService = new k8s.core.v1.Service(
   }
 );
 
-// Create Ingress for Authelia public access
+// Create HTTPRoute for Authelia public access (Gateway API)
+export const autheliaHTTPRoute = new k8s.apiextensions.CustomResource(
+  "authelia-httproute",
+  {
+    apiVersion: "gateway.networking.k8s.io/v1",
+    kind: "HTTPRoute",
+    metadata: {
+      name: "authelia",
+      namespace: autheliaNamespace.metadata.name,
+    },
+    spec: {
+      parentRefs: [
+        {
+          name: "homelab-gateway",
+          namespace: "traefik-system",
+        },
+      ],
+      hostnames: [pulumi.interpolate`auth.${homelabConfig.require("domain")}`],
+      rules: [
+        {
+          matches: [
+            {
+              path: {
+                type: "PathPrefix",
+                value: "/",
+              },
+            },
+          ],
+          backendRefs: [
+            {
+              name: autheliaService.metadata.name,
+              port: 9091,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    dependsOn: [autheliaService],
+  }
+);
+
+// Create legacy Ingress for backward compatibility (disabled by default)
+// Note: This can be removed after Gateway API is confirmed working
 export const autheliaIngress = new k8s.networking.v1.Ingress(
   "authelia-ingress",
   {
     metadata: {
-      name: "authelia",
+      name: "authelia-legacy",
       namespace: autheliaNamespace.metadata.name,
       annotations: {
         "cert-manager.io/cluster-issuer": "letsencrypt-prod",
         "nginx.ingress.kubernetes.io/ssl-redirect": "false",
+        // Disable this ingress - Gateway API is primary
+        "nginx.ingress.kubernetes.io/server-alias": "_disabled_",
       },
     },
     spec: {
-      ingressClassName: "nginx",
+      ingressClassName: "nginx-disabled", // Use non-existent class to disable
       tls: [
         {
           hosts: [pulumi.interpolate`auth.${homelabConfig.require("domain")}`],
-          secretName: "authelia-tls",
+          secretName: "authelia-legacy-tls",
         },
       ],
       rules: [
         {
-          host: pulumi.interpolate`auth.${homelabConfig.require("domain")}`,
+          host: pulumi.interpolate`auth-legacy.${homelabConfig.require("domain")}`, // Use different hostname
           http: {
             paths: [
               {
@@ -383,10 +429,10 @@ export const autheliaDnsRecord = new cloudflare.Record(
     type: "CNAME",
     content: tunnelCname, // Use the actual Cloudflare tunnel hostname
     proxied: true,
-    comment: "Managed by Pulumi - Authelia authentication",
+    comment: "Managed by Pulumi - Authelia authentication (Gateway API)",
   },
   {
-    dependsOn: [autheliaIngress],
+    dependsOn: [autheliaHTTPRoute],
   }
 );
 

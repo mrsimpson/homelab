@@ -1,5 +1,6 @@
 import { homelabConfig } from "@mrsimpson/homelab-config";
 import * as k8s from "@pulumi/kubernetes";
+import * as pulumi from "@pulumi/pulumi";
 
 /**
  * cert-manager - Automatic TLS certificate management
@@ -8,6 +9,8 @@ import * as k8s from "@pulumi/kubernetes";
  * - Automatic Let's Encrypt certificate provisioning
  * - Certificate renewal
  * - ClusterIssuer for production certificates
+ * - DNS-01 challenge support for wildcard certificates
+ * - DNS-01 challenge support for wildcard certificates
  *
  * WEBHOOK READINESS:
  * The cert-manager ValidatingWebhookConfiguration must be ready before creating
@@ -82,8 +85,14 @@ export const letsEncryptIssuer = new k8s.apiextensions.CustomResource(
         solvers: [
           {
             http01: {
-              ingress: {
-                class: "nginx",
+              gatewayHTTPRoute: {
+                parentRefs: [
+                  {
+                    name: "homelab-gateway",
+                    namespace: "traefik-system",
+                    kind: "Gateway",
+                  },
+                ],
               },
             },
           },
@@ -96,4 +105,63 @@ export const letsEncryptIssuer = new k8s.apiextensions.CustomResource(
   }
 );
 
+// Create Cloudflare API token secret for DNS-01 challenges
+const cloudflareConfig = new pulumi.Config("cloudflare");
+export const cloudflareApiTokenSecret = new k8s.core.v1.Secret(
+  "cloudflare-api-token",
+  {
+    metadata: {
+      name: "cloudflare-api-token",
+      namespace: certManagerNamespace.metadata.name,
+    },
+    type: "Opaque",
+    stringData: {
+      "api-token": cloudflareConfig.requireSecret("apiToken"),
+    },
+  },
+  {
+    dependsOn: [certManager],
+  }
+);
+
+// Create DNS-01 ClusterIssuer for wildcard certificates
+export const letsEncryptDns01Issuer = new k8s.apiextensions.CustomResource(
+  "letsencrypt-prod-dns01",
+  {
+    apiVersion: "cert-manager.io/v1",
+    kind: "ClusterIssuer",
+    metadata: {
+      name: "letsencrypt-prod-dns01",
+    },
+    spec: {
+      acme: {
+        server: "https://acme-v02.api.letsencrypt.org/directory",
+        email: homelabConfig.email,
+        privateKeySecretRef: {
+          name: "letsencrypt-prod-dns01",
+        },
+        solvers: [
+          {
+            dns01: {
+              cloudflare: {
+                apiTokenSecretRef: {
+                  name: cloudflareApiTokenSecret.metadata.name,
+                  key: "api-token",
+                },
+              },
+            },
+            selector: {
+              dnsZones: [homelabConfig.domain],
+            },
+          },
+        ],
+      },
+    },
+  },
+  {
+    dependsOn: [certManager, cloudflareApiTokenSecret],
+  }
+);
+
 export const clusterIssuerName = letsEncryptIssuer.metadata.name;
+export const dns01ClusterIssuerName = letsEncryptDns01Issuer.metadata.name;

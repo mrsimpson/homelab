@@ -3,17 +3,18 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 
 /**
- * ExposedWebApp - Reusable component for deploying web applications with secure internet exposure
+ * ExposedWebApp - Reusable component for deploying web applications with secure internet exposure via Gateway API
  *
- * This component is infrastructure-agnostic and can be used with or without:
- * - Cert-manager for automatic TLS certificates
- * - Cloudflare for DNS and tunnel routing
- * - Authelia for centralized authentication
+ * This component uses the Gateway API standard for HTTP routing and authentication:
+ * - HTTPRoute resources for routing configuration
+ * - Traefik ForwardAuth middleware for Authelia integration
+ * - Automatic TLS certificate management with cert-manager
+ * - Resolves HTTP scheme compatibility issues with Authelia v4.38.0
  *
  * Automatically configures:
  * - Kubernetes Deployment
  * - Kubernetes Service (ClusterIP)
- * - Ingress with optional TLS and forward authentication
+ * - HTTPRoute with optional ForwardAuth middleware
  * - Optional Cloudflare DNS record
  * - Optional persistent storage
  *
@@ -22,6 +23,7 @@ import * as pulumi from "@pulumi/pulumi";
  *     image: "ghost:5",
  *     domain: "blog.example.com",
  *     port: 2368,
+ *     auth: AuthType.FORWARD,
  *     cloudflare: {
  *       zoneId: "abc123",
  *       tunnelCname: "tunnel.example.com"
@@ -29,29 +31,9 @@ import * as pulumi from "@pulumi/pulumi";
  *     tls: {
  *       clusterIssuer: letsEncryptIssuer
  *     },
- *     ingress: {
- *       controller: ingressNginx
+ *     gatewayApi: {
+ *       controller: traefik
  *     }
- *   });
- *
- * Example (with private container registry):
- *   new ExposedWebApp("blog", {
- *     image: "ghcr.io/username/my-app:latest",
- *     domain: "blog.example.com",
- *     port: 2368,
- *     imagePullSecrets: [{ name: "ghcr-pull-secret" }],
- *     externalSecrets: {
- *       operator: externalSecretsOperator
- *     }
- *   });
- *   // Note: If creating a new namespace, ExternalSecret for known pull secrets
- *   // (ghcr-pull-secret, dockerhub-pull-secret) will be auto-created
- *
- * Example (standalone):
- *   new ExposedWebApp("blog", {
- *     image: "ghost:5",
- *     domain: "blog.example.com",
- *     port: 2368
  *   });
  */
 
@@ -61,7 +43,7 @@ import * as pulumi from "@pulumi/pulumi";
 export enum AuthType {
   /** No authentication required */
   NONE = "none",
-  /** Authelia forward authentication via nginx annotations */
+  /** Authelia forward authentication via Traefik ForwardAuth middleware */
   FORWARD = "forward",
 }
 
@@ -85,11 +67,17 @@ export interface TLSConfig {
   clusterIssuerName?: string | pulumi.Output<string>;
 }
 
-export interface IngressConfig {
-  /** Ingress controller resource to depend on */
+export interface GatewayApiConfig {
+  /** Gateway class name (defaults to "traefik") */
+  gatewayClass?: string;
+  /** Gateway name (defaults to "homelab-gateway") */
+  gatewayName?: string;
+  /** Gateway namespace (defaults to "traefik-system") */
+  gatewayNamespace?: string;
+  /** ForwardAuth middleware name for authentication (defaults to "authelia-forwardauth") */
+  forwardAuthMiddleware?: string;
+  /** Gateway controller resource to depend on */
   controller?: pulumi.Resource;
-  /** Ingress class name (defaults to "nginx") */
-  className?: string;
 }
 
 export interface ExternalSecretsConfig {
@@ -97,15 +85,6 @@ export interface ExternalSecretsConfig {
   operator?: pulumi.Resource;
   /** ClusterSecretStore name (defaults to "pulumi-esc") */
   storeName?: string;
-}
-
-export interface ForwardAuthConfig {
-  /** Authelia verify URL for forward authentication */
-  verifyUrl: string | pulumi.Output<string>;
-  /** Authelia signin URL for redirects */
-  signinUrl: string | pulumi.Output<string>;
-  /** Response headers to forward from Authelia (defaults to Remote-User,Remote-Email,Remote-Groups) */
-  responseHeaders?: string;
 }
 
 export interface ExposedWebAppArgs {
@@ -146,18 +125,17 @@ export interface ExposedWebAppArgs {
   cloudflare?: CloudflareConfig;
   /** TLS/cert-manager configuration */
   tls?: TLSConfig;
-  /** Ingress controller configuration */
-  ingress?: IngressConfig;
+  /** Gateway API configuration */
+  gatewayApi?: GatewayApiConfig;
   /** External Secrets Operator configuration */
   externalSecrets?: ExternalSecretsConfig;
-  /** Forward authentication configuration (Authelia) */
-  forwardAuth?: ForwardAuthConfig;
 }
 
 export class ExposedWebApp extends pulumi.ComponentResource {
   public readonly deployment: k8s.apps.v1.Deployment;
   public readonly service: k8s.core.v1.Service;
-  public readonly ingress: k8s.networking.v1.Ingress;
+  public readonly httpRoute: k8s.apiextensions.CustomResource;
+  public readonly forwardAuthMiddleware?: k8s.apiextensions.CustomResource;
   public readonly dnsRecord?: cloudflare.Record;
   public readonly pvc?: k8s.core.v1.PersistentVolumeClaim;
 
@@ -190,7 +168,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 
     // If creating a new namespace AND imagePullSecrets are specified,
     // automatically create ExternalSecrets for common pull secret names
-    // This ensures private images can be pulled without manual secret creation
     const pullSecretResources: k8s.apiextensions.CustomResource[] = [];
     if (isCreatingNamespace && args.imagePullSecrets && args.externalSecrets) {
       const storeName = args.externalSecrets.storeName || "pulumi-esc";
@@ -449,115 +426,126 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       { ...childOpts, dependsOn: [this.deployment] }
     );
 
-    // Build ingress dependencies
-    const ingressDeps: pulumi.Resource[] = [this.service];
-    if (args.ingress?.controller) {
-      ingressDeps.push(args.ingress.controller);
+    // Gateway API configuration values
+    const gatewayName = args.gatewayApi?.gatewayName || "homelab-gateway";
+    const gatewayNamespace = args.gatewayApi?.gatewayNamespace || "traefik-system";
+
+    // Build Gateway API dependencies
+    const httpRouteDeps: pulumi.Resource[] = [this.service];
+    if (args.gatewayApi?.controller) {
+      httpRouteDeps.push(args.gatewayApi.controller);
     }
     if (args.tls?.clusterIssuer) {
-      ingressDeps.push(args.tls.clusterIssuer);
+      httpRouteDeps.push(args.tls.clusterIssuer);
+    }
+
+    // Create ForwardAuth middleware in application namespace if authentication is enabled
+    if (args.auth === AuthType.FORWARD) {
+      this.forwardAuthMiddleware = new k8s.apiextensions.CustomResource(
+        `${name}-forwardauth`,
+        {
+          apiVersion: "traefik.io/v1alpha1",
+          kind: "Middleware",
+          metadata: {
+            name: `${name}-forwardauth`,
+            namespace: namespace.metadata.name,
+          },
+          spec: {
+            forwardAuth: {
+              address: "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
+              trustForwardHeader: true,
+              // Required headers for Authelia authentication (fixes HTTP scheme issue)
+              authRequestHeaders: [
+                "X-Original-URL",
+                "X-Original-Method",
+                "X-Forwarded-Host",
+                "X-Forwarded-Proto",
+                "X-Forwarded-Uri",
+                "Accept",
+                "Authorization",
+                "Cookie",
+              ],
+              authResponseHeaders: ["Remote-User", "Remote-Groups", "Remote-Name", "Remote-Email"],
+            },
+          },
+        },
+        {
+          ...childOpts,
+          dependsOn: httpRouteDeps,
+        }
+      );
+
+      // Add the middleware to dependencies for HTTPRoute
+      httpRouteDeps.push(this.forwardAuthMiddleware);
     }
 
     // Determine TLS configuration
     const tlsIssuerName = args.tls?.clusterIssuerName || "letsencrypt-prod";
     const hasTLS = args.tls?.clusterIssuer || args.tls?.clusterIssuerName;
 
-    // Build ingress annotations
-    const ingressAnnotations: Record<string, pulumi.Input<string>> = {};
-    if (hasTLS) {
-      ingressAnnotations["cert-manager.io/cluster-issuer"] = tlsIssuerName;
-    }
-
-    // SSL redirect handling
-    if (args.cloudflare) {
-      // When using Cloudflare Tunnel, disable SSL redirect
-      // Cloudflare handles TLS termination and connects to ingress via HTTP
-      ingressAnnotations["nginx.ingress.kubernetes.io/ssl-redirect"] = "false";
-    } else if (hasTLS) {
-      // Enable SSL redirect when TLS is configured but NOT using Cloudflare
-      ingressAnnotations["nginx.ingress.kubernetes.io/ssl-redirect"] = "true";
-    }
-
-    // Forward authentication (Authelia) - Official nginx ingress method
-    if (args.auth === AuthType.FORWARD) {
-      // Official annotations from Authelia documentation
-      ingressAnnotations["nginx.ingress.kubernetes.io/auth-method"] = "GET";
-      ingressAnnotations["nginx.ingress.kubernetes.io/auth-url"] =
-        "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request";
-      ingressAnnotations["nginx.ingress.kubernetes.io/auth-signin"] =
-        "https://auth.no-panic.org?rm=$request_method&rd=$request_uri";
-      ingressAnnotations["nginx.ingress.kubernetes.io/auth-response-headers"] =
-        "Remote-User,Remote-Name,Remote-Groups,Remote-Email";
-
-      // Force nginx to use proper scheme detection
-      ingressAnnotations["nginx.ingress.kubernetes.io/proxy-set-headers"] =
-        "ingress-nginx/custom-headers";
-
-      // Configuration to ensure proper headers are sent to backend after auth
-      ingressAnnotations["nginx.ingress.kubernetes.io/configuration-snippet"] = `
-        auth_request_set $user $upstream_http_remote_user;
-        auth_request_set $groups $upstream_http_remote_groups;
-        auth_request_set $name $upstream_http_remote_name;
-        auth_request_set $email $upstream_http_remote_email;
-        proxy_set_header Remote-User $user;
-        proxy_set_header Remote-Groups $groups;
-        proxy_set_header Remote-Name $name;
-        proxy_set_header Remote-Email $email;`;
-    }
-
-    // Forward headers from proxy (Cloudflare, ingress controller)
-    // This allows backends to know the real client IP, protocol (HTTPS), and host
-    // Critical for Authelia to know requests are HTTPS and to generate correct redirect URLs
-    if (args.cloudflare || args.auth === AuthType.FORWARD) {
-      ingressAnnotations["nginx.ingress.kubernetes.io/use-forwarded-headers"] = "true";
-      ingressAnnotations["nginx.ingress.kubernetes.io/compute-full-forwarded-for"] = "true";
-    }
-
-    // Create Ingress
-    this.ingress = new k8s.networking.v1.Ingress(
-      `${name}-ingress`,
-      {
-        metadata: {
-          name: name,
-          namespace: namespace.metadata.name,
-          annotations: ingressAnnotations,
+    // Build HTTPRoute spec
+    const httpRouteSpec: any = {
+      parentRefs: [
+        {
+          name: gatewayName,
+          namespace: gatewayNamespace,
         },
-        spec: {
-          ingressClassName: args.ingress?.className || "nginx",
-          tls: hasTLS
-            ? [
-                {
-                  hosts: [args.domain],
-                  secretName: `${name}-tls`,
-                },
-              ]
-            : undefined,
-          rules: [
+      ],
+      hostnames: [args.domain],
+      rules: [
+        {
+          matches: [
             {
-              host: args.domain,
-              http: {
-                paths: [
-                  {
-                    path: "/",
-                    pathType: "Prefix",
-                    backend: {
-                      service: {
-                        name: this.service.metadata.name,
-                        port: {
-                          number: 80,
-                        },
-                      },
-                    },
-                  },
-                ],
+              path: {
+                type: "PathPrefix",
+                value: "/",
               },
             },
           ],
+          backendRefs: [
+            {
+              name: this.service.metadata.name,
+              port: 80,
+            },
+          ],
         },
+      ],
+    };
+
+    // Add ForwardAuth middleware for authentication
+    if (args.auth === AuthType.FORWARD && this.forwardAuthMiddleware) {
+      httpRouteSpec.rules[0].filters = [
+        {
+          type: "ExtensionRef",
+          extensionRef: {
+            group: "traefik.io",
+            kind: "Middleware",
+            name: this.forwardAuthMiddleware.metadata.name,
+          },
+        },
+      ];
+    }
+
+    // Create Gateway API HTTPRoute
+    this.httpRoute = new k8s.apiextensions.CustomResource(
+      `${name}-httproute`,
+      {
+        apiVersion: "gateway.networking.k8s.io/v1",
+        kind: "HTTPRoute",
+        metadata: {
+          name: name,
+          namespace: namespace.metadata.name,
+          annotations: hasTLS
+            ? {
+                "cert-manager.io/cluster-issuer": tlsIssuerName,
+              }
+            : {},
+        },
+        spec: httpRouteSpec,
       },
       {
         ...childOpts,
-        dependsOn: ingressDeps,
+        dependsOn: httpRouteDeps,
       }
     );
 
@@ -581,7 +569,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     this.registerOutputs({
       deploymentName: this.deployment.metadata.name,
       serviceName: this.service.metadata.name,
-      ingressName: this.ingress.metadata.name,
+      httpRouteName: this.httpRoute.metadata.name,
+      forwardAuthMiddlewareName: this.forwardAuthMiddleware?.metadata.name,
       domain: args.domain,
       dnsRecordId: this.dnsRecord?.id,
     });

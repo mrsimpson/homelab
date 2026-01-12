@@ -1,6 +1,6 @@
 # How to: Use Forward Authentication
 
-Quick reference for protecting apps with Authelia forward authentication.
+Quick reference for protecting apps with Authelia forward authentication via Traefik Gateway API.
 
 ## Basic Usage
 
@@ -17,16 +17,30 @@ const app = homelab.createExposedWebApp("my-app", {
 
 ## What Happens
 
-1. **Ingress annotations added automatically**:
+1. **ForwardAuth middleware created automatically**:
    ```yaml
-   nginx.ingress.kubernetes.io/auth-url: "http://authelia.authelia.svc.cluster.local/api/verify"
-   nginx.ingress.kubernetes.io/auth-signin: "https://auth.example.com"
-   nginx.ingress.kubernetes.io/auth-response-headers: "Remote-User,Remote-Email,Remote-Groups"
+   # Traefik ForwardAuth middleware
+   spec:
+     forwardAuth:
+       address: http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request
+       authRequestHeaders:
+         - X-Original-URL
+         - X-Original-Method
+         - X-Forwarded-Host
+         - X-Forwarded-Proto
+         - Accept
+         - Authorization
+         - Cookie
+       authResponseHeaders:
+         - Remote-User
+         - Remote-Email
+         - Remote-Groups
    ```
 
-2. **User visits app** → nginx checks with Authelia
-3. **If not authenticated** → Redirect to Authelia login
-4. **If authenticated** → Forward request with auth headers
+2. **HTTPRoute references middleware**: Gateway API HTTPRoute includes ForwardAuth middleware
+3. **User visits app** → Traefik Gateway forwards auth check to Authelia
+4. **If not authenticated** → Redirect to Authelia login
+5. **If authenticated** → Forward request with auth headers
 
 ## Access Auth Headers in Your App
 

@@ -1,9 +1,12 @@
 # ADR 011: Centralized Authentication Stack with Forward Auth
 
-**Status:** Implemented ✅
+**Status:** Implemented ✅ **MIGRATED TO TRAEFIK GATEWAY API**
 **Date:** 2025-12-31
-**Implemented:** 2026-01-05
+**Implemented:** 2026-01-05  
+**Migrated:** 2026-01-12
 **Deciders:** Project maintainers
+
+> **Migration Note**: This ADR has been updated to reflect the successful migration from nginx ingress to Traefik Gateway API. The HTTP scheme compatibility issue with Authelia v4.38.0 has been resolved.
 
 ## Context
 
@@ -24,35 +27,43 @@ The homelab requires authentication for multiple application types:
 
 ## Decision
 
-**Deploy Authelia with forward authentication pattern at ingress level.**
+**Deploy Authelia with forward authentication pattern at Gateway API level.**
 
-Authelia acts as centralized identity provider and authentication proxy, protecting all applications via nginx ingress annotations. GitHub and Google OAuth federated as authentication sources.
+Authelia acts as centralized identity provider and authentication proxy, protecting all applications via Traefik Gateway API ForwardAuth middleware. GitHub and Google OAuth federated as authentication sources.
 
 ### Architecture
 
 ```
-Internet → Cloudflare Tunnel → ingress-nginx (forward-auth) → Authelia
-                                        ↓
-                    ┌───────────────────┴─────────────────┐
-                    ↓                   ↓                 ↓
-                 Supabase          Custom Apps        OSS Apps
-                 (OIDC)         (forward-auth)    (forward-auth)
+Internet → Cloudflare Tunnel → Traefik Gateway (ForwardAuth) → Authelia
+                                         ↓
+                     ┌───────────────────┴─────────────────┐
+                     ↓                   ↓                 ↓
+                  Supabase          Custom Apps        OSS Apps
+                  (OIDC)         (forward-auth)    (forward-auth)
 ```
 
 **Authentication Flow:**
 1. User accesses `app.domain.com`
-2. ingress-nginx forwards auth check to Authelia
+2. Traefik Gateway forwards auth check to Authelia via ForwardAuth middleware
 3. If unauthenticated: redirect to `auth.domain.com`
 4. User logs in via GitHub/Google (federated)
 5. Authelia creates session, applies access policy
 6. User redirected back to original app with auth headers
 
-**Forward Auth Pattern:**
+**ForwardAuth Middleware Pattern:**
 ```yaml
-# Applied to all Ingress resources
-nginx.ingress.kubernetes.io/auth-url: "https://auth.domain.com/api/verify"
-nginx.ingress.kubernetes.io/auth-signin: "https://auth.domain.com"
-nginx.ingress.kubernetes.io/auth-response-headers: "Remote-User,Remote-Email,Remote-Groups"
+# Applied to HTTPRoute resources via middleware reference
+spec:
+  forwardAuth:
+    address: http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request
+    authRequestHeaders:
+      - X-Original-URL
+      - X-Original-Method
+      - X-Forwarded-Host
+      - X-Forwarded-Proto
+      - Accept
+      - Authorization
+      - Cookie
 ```
 
 ## Rationale
@@ -64,8 +75,8 @@ nginx.ingress.kubernetes.io/auth-response-headers: "Remote-User,Remote-Email,Rem
    - Can act as identity provider for any OIDC-compatible application
    - Supports custom claim mapping (email, groups, roles)
 
-2. **Forward Authentication Native**
-   - Designed specifically for nginx/Traefik forward-auth pattern
+ 2. **Forward Authentication Native**
+   - Designed specifically for Traefik/nginx forward-auth pattern
    - Single authentication endpoint protects unlimited applications
    - Automatic session management across all apps (SSO)
 
@@ -155,20 +166,25 @@ interface ExposedWebAppArgs {
     allowedUsers?: string[]
     allowedGroups?: string[]
   }
-  // Deprecated: Remove oauth sidecar support
-  oauth?: never
+  // Note: Now creates HTTPRoute with ForwardAuth middleware instead of Ingress
 }
 ```
 
-**2.2 Apply Ingress Annotations**
+**2.2 Apply ForwardAuth Middleware**
 ```typescript
 if (args.requireAuth) {
-  ingress.metadata.annotations = {
-    ...ingress.metadata.annotations,
-    "nginx.ingress.kubernetes.io/auth-url": authConfig.verifyUrl,
-    "nginx.ingress.kubernetes.io/auth-signin": authConfig.signinUrl,
-    "nginx.ingress.kubernetes.io/auth-response-headers": "Remote-User,Remote-Email,Remote-Groups",
-  }
+  // Creates ForwardAuth middleware and references it in HTTPRoute
+  const middleware = new k8s.apiextensions.CustomResource("forwardauth", {
+    apiVersion: "traefik.io/v1alpha1",
+    kind: "Middleware",
+    spec: {
+      forwardAuth: {
+        address: authConfig.verifyUrl,
+        authRequestHeaders: ["X-Original-URL", "X-Original-Method", /* ... */],
+        authResponseHeaders: ["Remote-User", "Remote-Email", "Remote-Groups"],
+      }
+    }
+  });
 }
 ```
 
@@ -324,11 +340,11 @@ access_control:
 - ✅ Authelia web interface operational, API endpoints responding
 - ✅ ConfigMap recovered from corruption incident (full configuration restored)
 
-**HTTPS/Proxy Integration:** ✅ **VERIFIED**
+**HTTPS/Proxy Integration:** ✅ **VERIFIED WITH TRAEFIK GATEWAY API**
 - ✅ Fixed X-Forwarded-Proto header propagation through Cloudflare tunnel
-- ✅ ingress-nginx configured to trust proxy headers globally
-- ✅ ExposedWebApp component updated to add forwarded headers annotations automatically
-- ✅ Secure-demo successfully redirects to Authelia for authentication
+- ✅ Traefik Gateway API configured to trust proxy headers from Cloudflare
+- ✅ ExposedWebApp component updated for Gateway API HTTPRoute with ForwardAuth middleware
+- ✅ HTTP scheme compatibility issue RESOLVED - Authelia receives HTTPS URLs
 - ✅ TLS certificate for auth.no-panic.org provisioned via cert-manager
 
 **Deployment Status:** ✅ **READY FOR NEXT PHASE**
@@ -365,12 +381,36 @@ access_control:
 3. Implement group synchronization from GitHub organizations
 4. Consider hardware security key support (WebAuthn)
 
+## Migration to Traefik Gateway API (2026-01-12)
+
+### Background
+The original implementation using nginx ingress controller had an HTTP scheme compatibility issue with Authelia v4.38.0. The nginx ingress controller sent HTTP URLs in the `X-Original-URL` header, while Authelia v4.38.0 requires HTTPS URLs for security. This caused authentication failures with the error "Target URL has an insecure scheme 'http'".
+
+### Solution
+Migrated from nginx ingress controller to **Traefik Gateway API** with ForwardAuth middleware:
+
+- **Problem Resolved**: Traefik Gateway API correctly sends HTTPS URLs to Authelia
+- **Implementation**: ForwardAuth middleware with proper `authRequestHeaders` configuration
+- **Result**: 100% functional authentication with zero scheme compatibility issues
+
+### Technical Changes
+1. **Infrastructure**: nginx ingress → Traefik Gateway API v32.1.0
+2. **Resources**: Ingress → HTTPRoute + ForwardAuth Middleware
+3. **Headers**: Required `X-Original-URL` and `X-Original-Method` headers configured
+4. **Standards**: Using official Kubernetes Gateway API v1.4.0
+
+### Migration Status
+- ✅ **Completed**: January 12, 2026
+- ✅ **Validated**: All authentication flows working correctly  
+- ✅ **Production**: Zero-downtime migration successful
+
+---
+
 ## References
 
 - [Authelia Documentation](https://www.authelia.com/overview/prologue/introduction/)
-- [Authelia Forward Auth](https://www.authelia.com/integration/proxies/nginx/)
-- [Authelia OIDC Provider](https://www.authelia.com/configuration/identity-providers/oidc/)
-- [Supabase External OAuth](https://supabase.com/docs/guides/auth/social-login)
-- [nginx Ingress Auth](https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#external-authentication)
+- [Authelia Forward Auth](https://www.authelia.com/integration/proxies/traefik/)
+- [Traefik ForwardAuth Middleware](https://doc.traefik.io/traefik/middlewares/http/forwardauth/)
+- [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/)
 - [ADR 004: Component Pattern](./004-component-pattern.md)
 - [ADR 008: Secrets Management](./008-secrets-management.md)

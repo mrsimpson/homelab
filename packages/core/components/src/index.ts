@@ -15,9 +15,8 @@ export type {
   StorageConfig,
   CloudflareConfig,
   TLSConfig,
-  IngressConfig,
+  GatewayApiConfig,
   ExternalSecretsConfig,
-  ForwardAuthConfig,
 } from "./ExposedWebApp";
 export type { HomelabContextConfig } from "./homelab-context";
 export type { CreateImagePullSecretArgs } from "./registry-secrets";

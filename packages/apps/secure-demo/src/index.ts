@@ -1,15 +1,20 @@
 import { homelabConfig } from "@mrsimpson/homelab-config";
-import type { ExposedWebApp, HomelabContext } from "@mrsimpson/homelab-core-components";
+import {
+  AuthType,
+  type ExposedWebApp,
+  type HomelabContext,
+} from "@mrsimpson/homelab-core-components";
 import * as pulumi from "@pulumi/pulumi";
 
 /**
- * Secure Demo - Example application protected by Authelia forward authentication
+ * Secure Demo - Example application protected by Authelia forward authentication via Gateway API
  *
- * Demonstrates the forward-auth pattern with Authelia:
+ * Demonstrates the forward-auth pattern with Authelia using Traefik Gateway API:
  * - No oauth2-proxy sidecar needed
- * - Authentication handled at ingress level
+ * - Authentication handled at HTTPRoute level via ForwardAuth middleware
  * - Single sign-on across all homelab apps
  * - Access controlled via Authelia policies
+ * - Resolves HTTP scheme compatibility issues with Authelia v4.38.0
  *
  * This is a simple nginx server that displays authentication headers
  * forwarded by Authelia, showing the logged-in user's information.
@@ -32,10 +37,9 @@ export function createSecureDemo(homelab: HomelabContext): {
     port: 8080,
     replicas: 2, // High availability - match nodejs-demo
 
-    // Enable forward authentication
-    // This will add nginx ingress annotations to forward auth checks to Authelia
-    // The forwardAuth configuration is automatically injected from homelab context
-    requireAuth: true,
+    // Enable Authelia forward authentication via Gateway API
+    // This will create HTTPRoute with ForwardAuth middleware reference
+    auth: AuthType.FORWARD,
 
     resources: {
       requests: { cpu: "50m", memory: "64Mi" },
@@ -50,7 +54,7 @@ export function createSecureDemo(homelab: HomelabContext): {
       },
     ],
 
-    tags: ["example", "authenticated", "authelia"],
+    tags: ["example", "authenticated", "authelia", "gateway-api"],
   });
 
   const url = pulumi.interpolate`https://${domain}`;

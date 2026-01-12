@@ -6,7 +6,7 @@
  * This stack sets up:
  * - Cloudflare Tunnel for secure internet exposure
  * - cert-manager for automatic TLS certificates
- * - ingress-nginx for HTTP(S) routing
+ * - traefik-gateway for HTTP(S) routing via Gateway API
  * - External Secrets Operator for secret management
  *
  * Exports the infrastructure context that can be used by applications.
@@ -33,7 +33,7 @@ export const pulumiStack = pulumi.getStack();
  */
 export function setupBaseInfra() {
   // DEPENDENCY CHAIN FOR BASE INFRASTRUCTURE:
-  // 1. Create core namespaces (cert-manager, ingress-nginx, external-secrets, cloudflare, longhorn)
+  // 1. Create core namespaces (cert-manager, traefik-system, external-secrets, cloudflare, longhorn)
   // 2. Deploy Helm charts in those namespaces
   // 3. Wait for external-secrets operator to be ready
   // 4. Create ClusterSecretStore to sync secrets from Pulumi ESC
@@ -49,6 +49,7 @@ export function setupBaseInfra() {
   // Depend on the NAMESPACE RESOURCES (not Helm charts) to ensure they exist
   // before any resources try to deploy into them.
   // This prevents "namespace not found" errors during deployment.
+  // Store as unused to satisfy dependency ordering without additional exports
   const infrastructureReady = new k8s.core.v1.ConfigMap(
     "base-infra-ready",
     {
@@ -63,7 +64,7 @@ export function setupBaseInfra() {
     {
       dependsOn: [
         coreInfra.certManagerNamespace,
-        coreInfra.ingressNginxNamespace,
+        coreInfra.traefikNamespace,
         coreInfra.externalSecretsNamespace,
         coreInfra.cloudflaredNamespace,
         coreInfra.longhornNamespaceResource,
@@ -73,7 +74,7 @@ export function setupBaseInfra() {
     }
   );
 
-  // Create HomelavContext for dependency injection into apps
+  // Create HomelabContext for dependency injection into apps
   // Apps will use this context to access infrastructure dependencies
   const homelabContext = new HomelabContext({
     cloudflare: {
@@ -84,8 +85,12 @@ export function setupBaseInfra() {
       clusterIssuer: coreInfra.letsEncryptIssuer,
       clusterIssuerName: coreInfra.clusterIssuerName,
     },
-    ingress: {
-      controller: coreInfra.ingressNginx,
+    gatewayApi: {
+      controller: coreInfra.traefik,
+      gatewayClass: "traefik",
+      gatewayName: "homelab-gateway",
+      gatewayNamespace: "traefik-system",
+      forwardAuthMiddleware: "authelia-forwardauth",
     },
     externalSecrets: {
       operator: coreInfra.externalSecretsOperator,
@@ -95,10 +100,11 @@ export function setupBaseInfra() {
   // Export infrastructure details
   return {
     context: homelabContext,
+    infrastructureReady, // Export to ensure dependency ordering
     // Core infrastructure namespaces - explicitly exported so Pulumi deploys them
     namespaces: {
       certManager: coreInfra.certManagerNamespace,
-      ingressNginx: coreInfra.ingressNginxNamespace,
+      traefik: coreInfra.traefikNamespace,
       externalSecrets: coreInfra.externalSecretsNamespace,
       cloudflared: coreInfra.cloudflaredNamespace,
       longhorn: coreInfra.longhornNamespaceResource,
@@ -115,8 +121,11 @@ export function setupBaseInfra() {
       letsEncryptIssuer: coreInfra.letsEncryptIssuer,
       clusterIssuerName: coreInfra.clusterIssuerName,
     },
-    ingress: {
-      ingressNginx: coreInfra.ingressNginx,
+    gateway: {
+      traefik: coreInfra.traefik,
+      gatewayClass: coreInfra.traefikGatewayClass,
+      gateway: coreInfra.homelabGateway,
+      forwardAuthMiddleware: coreInfra.autheliForwardAuth,
     },
     externalSecrets: {
       externalSecretsOperator: coreInfra.externalSecretsOperator,
