@@ -3,18 +3,18 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 
 /**
- * ExposedWebApp - Reusable component for deploying web applications with secure internet exposure
+ * ExposedWebApp - Reusable component for deploying web applications with secure internet exposure via Gateway API
  *
- * This component is infrastructure-agnostic and can be used with or without:
- * - Cert-manager for automatic TLS certificates
- * - Cloudflare for DNS and tunnel routing
- * - External Secrets Operator for OAuth secret management
+ * This component uses the Gateway API standard for HTTP routing and authentication:
+ * - HTTPRoute resources for routing configuration
+ * - Traefik ForwardAuth middleware for Authelia integration
+ * - Automatic TLS certificate management with cert-manager
+ * - Resolves HTTP scheme compatibility issues with Authelia v4.38.0
  *
  * Automatically configures:
  * - Kubernetes Deployment
- * - Optional OAuth2 Proxy sidecar for authentication
  * - Kubernetes Service (ClusterIP)
- * - Ingress with optional TLS
+ * - HTTPRoute with optional ForwardAuth middleware
  * - Optional Cloudflare DNS record
  * - Optional persistent storage
  *
@@ -23,6 +23,7 @@ import * as pulumi from "@pulumi/pulumi";
  *     image: "ghost:5",
  *     domain: "blog.example.com",
  *     port: 2368,
+ *     auth: AuthType.FORWARD,
  *     cloudflare: {
  *       zoneId: "abc123",
  *       tunnelCname: "tunnel.example.com"
@@ -30,33 +31,20 @@ import * as pulumi from "@pulumi/pulumi";
  *     tls: {
  *       clusterIssuer: letsEncryptIssuer
  *     },
- *     ingress: {
- *       controller: ingressNginx
+ *     gatewayApi: {
+ *       controller: traefik
  *     }
- *   });
- *
- * Example (with private container registry):
- *   new ExposedWebApp("blog", {
- *     image: "ghcr.io/username/my-app:latest",
- *     domain: "blog.example.com",
- *     port: 2368,
- *     imagePullSecrets: [{ name: "ghcr-pull-secret" }]
- *   });
- *
- * Example (standalone):
- *   new ExposedWebApp("blog", {
- *     image: "ghost:5",
- *     domain: "blog.example.com",
- *     port: 2368
  *   });
  */
 
-export interface OAuthConfig {
-  provider: "google" | "github" | "oidc";
-  clientId: string;
-  clientSecret: pulumi.Output<string>;
-  allowedEmails?: string[];
-  oidcIssuerUrl?: string;
+/**
+ * Authentication type for ExposedWebApp
+ */
+export enum AuthType {
+  /** No authentication required */
+  NONE = "none",
+  /** Authelia forward authentication via Traefik ForwardAuth middleware */
+  FORWARD = "forward",
 }
 
 export interface StorageConfig {
@@ -79,11 +67,17 @@ export interface TLSConfig {
   clusterIssuerName?: string | pulumi.Output<string>;
 }
 
-export interface IngressConfig {
-  /** Ingress controller resource to depend on */
+export interface GatewayApiConfig {
+  /** Gateway class name (defaults to "traefik") */
+  gatewayClass?: string;
+  /** Gateway name (defaults to "homelab-gateway") */
+  gatewayName?: string;
+  /** Gateway namespace (defaults to "traefik-system") */
+  gatewayNamespace?: string;
+  /** ForwardAuth middleware name for authentication (defaults to "authelia-forwardauth") */
+  forwardAuthMiddleware?: string;
+  /** Gateway controller resource to depend on */
   controller?: pulumi.Resource;
-  /** Ingress class name (defaults to "nginx") */
-  className?: string;
 }
 
 export interface ExternalSecretsConfig {
@@ -104,8 +98,8 @@ export interface ExposedWebAppArgs {
   replicas?: number;
   /** Environment variables */
   env?: Array<{ name: string; value: string | pulumi.Output<string> }>;
-  /** OAuth2 Proxy configuration */
-  oauth?: OAuthConfig;
+  /** Authentication type (defaults to "none") */
+  auth?: AuthType;
   /** Persistent storage configuration */
   storage?: StorageConfig;
   /** Resource requests and limits */
@@ -123,14 +117,16 @@ export interface ExposedWebAppArgs {
     runAsGroup?: number;
     fsGroup?: number;
   };
+  /** Optional pre-created namespace (if not provided, will create one) */
+  namespace?: k8s.core.v1.Namespace;
 
   // Infrastructure dependencies (all optional)
   /** Cloudflare DNS configuration */
   cloudflare?: CloudflareConfig;
   /** TLS/cert-manager configuration */
   tls?: TLSConfig;
-  /** Ingress controller configuration */
-  ingress?: IngressConfig;
+  /** Gateway API configuration */
+  gatewayApi?: GatewayApiConfig;
   /** External Secrets Operator configuration */
   externalSecrets?: ExternalSecretsConfig;
 }
@@ -138,7 +134,8 @@ export interface ExposedWebAppArgs {
 export class ExposedWebApp extends pulumi.ComponentResource {
   public readonly deployment: k8s.apps.v1.Deployment;
   public readonly service: k8s.core.v1.Service;
-  public readonly ingress: k8s.networking.v1.Ingress;
+  public readonly httpRoute: k8s.apiextensions.CustomResource;
+  public readonly forwardAuthMiddleware?: k8s.apiextensions.CustomResource;
   public readonly dnsRecord?: cloudflare.Record;
   public readonly pvc?: k8s.core.v1.PersistentVolumeClaim;
 
@@ -147,77 +144,144 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 
     const childOpts = { parent: this };
 
-    // Create namespace for the app
-    const namespace = new k8s.core.v1.Namespace(
-      `${name}-ns`,
-      {
-        metadata: {
-          name: name,
-          labels: {
-            app: name,
-            environment: pulumi.getStack(),
-            // Pod Security Standards enforcement (restricted)
-            "pod-security.kubernetes.io/enforce": "restricted",
-            "pod-security.kubernetes.io/audit": "restricted",
-            "pod-security.kubernetes.io/warn": "restricted",
-          },
-        },
-      },
-      childOpts
-    );
-
-    // Create GHCR pull secret if imagePullSecrets are specified
-    // This allows the app to pull private images from GitHub Container Registry
-    if (
-      args.imagePullSecrets &&
-      args.imagePullSecrets.length > 0 &&
-      args.externalSecrets?.operator
-    ) {
-      // Create ExternalSecret that syncs GHCR credentials from Pulumi ESC
-      new k8s.apiextensions.CustomResource(
-        `${name}-ghcr-pull-secret`,
+    // Use provided namespace or create a new one
+    const isCreatingNamespace = !args.namespace;
+    const namespace =
+      args.namespace ||
+      new k8s.core.v1.Namespace(
+        `${name}-ns`,
         {
-          apiVersion: "external-secrets.io/v1beta1",
-          kind: "ExternalSecret",
           metadata: {
-            name: "ghcr-pull-secret",
-            namespace: namespace.metadata.name,
-          },
-          spec: {
-            refreshInterval: "1h",
-            secretStoreRef: {
-              name: args.externalSecrets.storeName || "pulumi-esc",
-              kind: "ClusterSecretStore",
+            name: name,
+            labels: {
+              app: name,
+              environment: pulumi.getStack(),
+              // Pod Security Standards enforcement (restricted)
+              "pod-security.kubernetes.io/enforce": "restricted",
+              "pod-security.kubernetes.io/audit": "restricted",
+              "pod-security.kubernetes.io/warn": "restricted",
             },
-            target: {
-              name: "ghcr-pull-secret",
-              creationPolicy: "Owner",
-              template: {
-                type: "kubernetes.io/dockerconfigjson",
-                data: {
-                  ".dockerconfigjson":
-                    '{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}',
-                },
-              },
-            },
-            data: [
-              {
-                secretKey: "github_username",
-                remoteRef: {
-                  key: "github-username",
-                },
-              },
-              {
-                secretKey: "github_token",
-                remoteRef: {
-                  key: "github-token",
-                },
-              },
-            ],
           },
         },
-        { ...childOpts, dependsOn: [namespace, args.externalSecrets.operator] }
+        childOpts
       );
+
+    // If creating a new namespace AND imagePullSecrets are specified,
+    // automatically create ExternalSecrets for common pull secret names
+    const pullSecretResources: k8s.apiextensions.CustomResource[] = [];
+    if (isCreatingNamespace && args.imagePullSecrets && args.externalSecrets) {
+      const storeName = args.externalSecrets.storeName || "pulumi-esc";
+
+      // Create dependencies for ExternalSecret
+      const externalSecretDeps: pulumi.Resource[] = [namespace];
+      if (args.externalSecrets.operator) {
+        externalSecretDeps.push(args.externalSecrets.operator);
+      }
+
+      args.imagePullSecrets.forEach((pullSecret) => {
+        // Only auto-create for known secret names to avoid creating unnecessary resources
+        if (pullSecret.name === "ghcr-pull-secret") {
+          pullSecretResources.push(
+            new k8s.apiextensions.CustomResource(
+              `${name}-ghcr-pull-secret`,
+              {
+                apiVersion: "external-secrets.io/v1beta1",
+                kind: "ExternalSecret",
+                metadata: {
+                  name: "ghcr-pull-secret",
+                  namespace: namespace.metadata.name,
+                },
+                spec: {
+                  refreshInterval: "1h",
+                  secretStoreRef: {
+                    name: storeName,
+                    kind: "ClusterSecretStore",
+                  },
+                  target: {
+                    name: "ghcr-pull-secret",
+                    creationPolicy: "Owner",
+                    template: {
+                      type: "kubernetes.io/dockerconfigjson",
+                      data: {
+                        ".dockerconfigjson": `{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
+                      },
+                    },
+                  },
+                  data: [
+                    {
+                      secretKey: "github_username",
+                      remoteRef: {
+                        key: "github-username",
+                      },
+                    },
+                    {
+                      secretKey: "github_token",
+                      remoteRef: {
+                        key: "github-token",
+                      },
+                    },
+                  ],
+                },
+              },
+              { ...childOpts, dependsOn: externalSecretDeps }
+            )
+          );
+        } else if (pullSecret.name === "dockerhub-pull-secret") {
+          pullSecretResources.push(
+            new k8s.apiextensions.CustomResource(
+              `${name}-dockerhub-pull-secret`,
+              {
+                apiVersion: "external-secrets.io/v1beta1",
+                kind: "ExternalSecret",
+                metadata: {
+                  name: "dockerhub-pull-secret",
+                  namespace: namespace.metadata.name,
+                },
+                spec: {
+                  refreshInterval: "1h",
+                  secretStoreRef: {
+                    name: storeName,
+                    kind: "ClusterSecretStore",
+                  },
+                  target: {
+                    name: "dockerhub-pull-secret",
+                    creationPolicy: "Owner",
+                    template: {
+                      type: "kubernetes.io/dockerconfigjson",
+                      data: {
+                        ".dockerconfigjson": `{
+  "auths": {
+    "https://index.docker.io/v1/": {
+      "username": "{{ .dockerhub_username }}",
+      "password": "{{ .dockerhub_token }}",
+      "auth": "{{ printf "%s:%s" .dockerhub_username .dockerhub_token | b64enc }}"
+    }
+  }
+}`,
+                      },
+                    },
+                  },
+                  data: [
+                    {
+                      secretKey: "dockerhub_username",
+                      remoteRef: {
+                        key: "dockerhub-credentials/username",
+                      },
+                    },
+                    {
+                      secretKey: "dockerhub_token",
+                      remoteRef: {
+                        key: "dockerhub-credentials/token",
+                      },
+                    },
+                  ],
+                },
+              },
+              { ...childOpts, dependsOn: externalSecretDeps }
+            )
+          );
+        }
+      });
     }
 
     // Optional: Create PVC for persistent storage
@@ -242,93 +306,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
         childOpts
       );
     }
-
-    // Optional: Create OAuth2 Proxy configuration
-    let oauthSecretName: pulumi.Output<string> | undefined;
-    if (args.oauth) {
-      const oauthDeps: pulumi.Resource[] = [namespace];
-      if (args.externalSecrets?.operator) {
-        oauthDeps.push(args.externalSecrets.operator);
-      }
-
-      // Use External Secrets if operator is provided, otherwise create a regular secret
-      if (args.externalSecrets?.operator) {
-        const oauthExternalSecret = new k8s.apiextensions.CustomResource(
-          `${name}-oauth`,
-          {
-            apiVersion: "external-secrets.io/v1beta1",
-            kind: "ExternalSecret",
-            metadata: {
-              name: `${name}-oauth`,
-              namespace: namespace.metadata.name,
-            },
-            spec: {
-              refreshInterval: "1h",
-              secretStoreRef: {
-                name: args.externalSecrets.storeName || "pulumi-esc",
-                kind: "ClusterSecretStore",
-              },
-              target: {
-                name: `${name}-oauth`,
-                creationPolicy: "Owner",
-              },
-              data: [
-                {
-                  secretKey: "clientId",
-                  remoteRef: {
-                    key: `${name}/oauth/clientId`,
-                  },
-                },
-                {
-                  secretKey: "clientSecret",
-                  remoteRef: {
-                    key: `${name}/oauth/clientSecret`,
-                  },
-                },
-                {
-                  secretKey: "cookieSecret",
-                  remoteRef: {
-                    key: `${name}/oauth/cookieSecret`,
-                  },
-                },
-              ],
-            },
-          },
-          { ...childOpts, dependsOn: oauthDeps }
-        );
-
-        oauthSecretName = oauthExternalSecret.metadata.name;
-      } else {
-        // Create a regular Kubernetes secret
-        const oauthSecret = new k8s.core.v1.Secret(
-          `${name}-oauth`,
-          {
-            metadata: {
-              name: `${name}-oauth`,
-              namespace: namespace.metadata.name,
-            },
-            stringData: {
-              clientId: args.oauth.clientId,
-              clientSecret: args.oauth.clientSecret,
-              // Generate a random cookie secret
-              cookieSecret: pulumi
-                .all([args.oauth.clientSecret])
-                .apply(() =>
-                  Buffer.from(
-                    Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))
-                  ).toString("base64")
-                ),
-            },
-          },
-          { ...childOpts, dependsOn: oauthDeps }
-        );
-
-        oauthSecretName = oauthSecret.metadata.name;
-      }
-    }
-
-    // Build container list
-    const containers: any[] = [];
 
     // Main application container
     const appContainer: any = {
@@ -367,83 +344,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       ];
     }
 
-    // If OAuth configured, add oauth2-proxy sidecar
-    if (args.oauth && oauthSecretName) {
-      const oauthProxyContainer: any = {
-        name: "oauth-proxy",
-        image: "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0",
-        ports: [
-          {
-            containerPort: 4180,
-            name: "oauth-http",
-          },
-        ],
-        args: [
-          "--http-address=0.0.0.0:4180",
-          `--upstream=http://localhost:${args.port}`,
-          "--email-domain=*",
-          "--cookie-secure=true",
-          "--cookie-httponly=true",
-          "--set-xauthrequest=true",
-        ],
-        env: [
-          {
-            name: "OAUTH2_PROXY_CLIENT_ID",
-            valueFrom: {
-              secretKeyRef: {
-                name: oauthSecretName,
-                key: "clientId",
-              },
-            },
-          },
-          {
-            name: "OAUTH2_PROXY_CLIENT_SECRET",
-            valueFrom: {
-              secretKeyRef: {
-                name: oauthSecretName,
-                key: "clientSecret",
-              },
-            },
-          },
-          {
-            name: "OAUTH2_PROXY_COOKIE_SECRET",
-            valueFrom: {
-              secretKeyRef: {
-                name: oauthSecretName,
-                key: "cookieSecret",
-              },
-            },
-          },
-        ],
-        resources: {
-          requests: { cpu: "10m", memory: "32Mi" },
-          limits: { cpu: "100m", memory: "128Mi" },
-        },
-      };
-
-      // Provider-specific configuration
-      if (args.oauth.provider === "google") {
-        oauthProxyContainer.args.push("--provider=google");
-      } else if (args.oauth.provider === "github") {
-        oauthProxyContainer.args.push("--provider=github");
-      } else if (args.oauth.provider === "oidc" && args.oauth.oidcIssuerUrl) {
-        oauthProxyContainer.args.push("--provider=oidc");
-        oauthProxyContainer.args.push(`--oidc-issuer-url=${args.oauth.oidcIssuerUrl}`);
-      }
-
-      // Email allowlist
-      if (args.oauth.allowedEmails) {
-        oauthProxyContainer.args.push(`--authenticated-emails-file=/dev/null`);
-        args.oauth.allowedEmails.forEach((email) => {
-          oauthProxyContainer.args.push(`--email-domain=${email.split("@")[1]}`);
-        });
-      }
-
-      containers.push(oauthProxyContainer);
-    }
-
-    containers.push(appContainer);
-
     // Build volumes list
     const volumes: any[] = [];
     if (args.storage && this.pvc) {
@@ -455,21 +355,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       });
     }
 
-    // Build Deployment dependencies
-    // If imagePullSecrets are specified, the pod may depend on those secrets existing.
-    // However, ExternalSecrets may take time to sync, so we add a small wait by depending
-    // on the external-secrets operator if it's available.
-    const deploymentDeps: pulumi.Resource[] = [namespace];
-    if (
-      args.externalSecrets?.operator &&
-      args.imagePullSecrets &&
-      args.imagePullSecrets.length > 0
-    ) {
-      // If using external secrets and image pull secrets, ensure the operator is ready
-      deploymentDeps.push(args.externalSecrets.operator);
-    }
-
     // Create Deployment
+    // Build deployment dependencies - include pull secrets if we created them
+    const deploymentDeps: pulumi.Resource[] = [namespace, ...pullSecretResources];
+
     this.deployment = new k8s.apps.v1.Deployment(
       `${name}-deployment`,
       {
@@ -502,7 +391,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                 runAsGroup: args.securityContext?.runAsGroup || 1000,
                 fsGroup: args.securityContext?.fsGroup || 1000,
               },
-              containers: containers,
+              containers: [appContainer],
               volumes: volumes.length > 0 ? volumes : undefined,
             },
           },
@@ -510,9 +399,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       },
       { ...childOpts, dependsOn: deploymentDeps }
     );
-
-    // Determine service target port (OAuth proxy if enabled, else app port)
-    const servicePort = args.oauth ? 4180 : args.port;
 
     // Create Service
     this.service = new k8s.core.v1.Service(
@@ -530,7 +416,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           ports: [
             {
               port: 80,
-              targetPort: servicePort,
+              targetPort: args.port,
               protocol: "TCP",
               name: "http",
             },
@@ -540,80 +426,143 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       { ...childOpts, dependsOn: [this.deployment] }
     );
 
-    // Build ingress dependencies
-    const ingressDeps: pulumi.Resource[] = [this.service];
-    if (args.ingress?.controller) {
-      ingressDeps.push(args.ingress.controller);
+    // Gateway API configuration values
+    const gatewayName = args.gatewayApi?.gatewayName || "homelab-gateway";
+    const gatewayNamespace = args.gatewayApi?.gatewayNamespace || "traefik-system";
+
+    // Build Gateway API dependencies
+    const httpRouteDeps: pulumi.Resource[] = [this.service];
+    if (args.gatewayApi?.controller) {
+      httpRouteDeps.push(args.gatewayApi.controller);
     }
     if (args.tls?.clusterIssuer) {
-      ingressDeps.push(args.tls.clusterIssuer);
+      httpRouteDeps.push(args.tls.clusterIssuer);
+    }
+
+    // Create ForwardAuth middleware in application namespace if authentication is enabled
+    if (args.auth === AuthType.FORWARD) {
+      this.forwardAuthMiddleware = new k8s.apiextensions.CustomResource(
+        `${name}-forwardauth`,
+        {
+          apiVersion: "traefik.io/v1alpha1",
+          kind: "Middleware",
+          metadata: {
+            name: `${name}-forwardauth`,
+            namespace: namespace.metadata.name,
+          },
+          spec: {
+            forwardAuth: {
+              address: "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
+              trustForwardHeader: true,
+              // Required headers for Authelia authentication (fixes HTTP scheme issue)
+              authRequestHeaders: [
+                "X-Original-URL",
+                "X-Original-Method",
+                "X-Forwarded-Host",
+                "X-Forwarded-Proto",
+                "X-Forwarded-Uri",
+                "Accept",
+                "Authorization",
+                "Cookie",
+              ],
+              authResponseHeaders: ["Remote-User", "Remote-Groups", "Remote-Name", "Remote-Email"],
+            },
+          },
+        },
+        {
+          ...childOpts,
+          dependsOn: httpRouteDeps,
+        }
+      );
+
+      // Add the middleware to dependencies for HTTPRoute
+      httpRouteDeps.push(this.forwardAuthMiddleware);
     }
 
     // Determine TLS configuration
     const tlsIssuerName = args.tls?.clusterIssuerName || "letsencrypt-prod";
     const hasTLS = args.tls?.clusterIssuer || args.tls?.clusterIssuerName;
 
-    // Build ingress annotations
-    const ingressAnnotations: Record<string, pulumi.Input<string>> = {};
-    if (hasTLS) {
-      ingressAnnotations["cert-manager.io/cluster-issuer"] = tlsIssuerName;
-    }
-
-    // SSL redirect handling
-    if (args.cloudflare) {
-      // When using Cloudflare Tunnel, disable SSL redirect
-      // Cloudflare handles TLS termination and connects to ingress via HTTP
-      ingressAnnotations["nginx.ingress.kubernetes.io/ssl-redirect"] = "false";
-    } else if (hasTLS) {
-      // Enable SSL redirect when TLS is configured but NOT using Cloudflare
-      ingressAnnotations["nginx.ingress.kubernetes.io/ssl-redirect"] = "true";
-    }
-
-    // Create Ingress
-    this.ingress = new k8s.networking.v1.Ingress(
-      `${name}-ingress`,
-      {
-        metadata: {
-          name: name,
-          namespace: namespace.metadata.name,
-          annotations: ingressAnnotations,
+    // Build HTTPRoute spec
+    const httpRouteSpec: any = {
+      parentRefs: [
+        {
+          name: gatewayName,
+          namespace: gatewayNamespace,
         },
-        spec: {
-          ingressClassName: args.ingress?.className || "nginx",
-          tls: hasTLS
-            ? [
-                {
-                  hosts: [args.domain],
-                  secretName: `${name}-tls`,
-                },
-              ]
-            : undefined,
-          rules: [
+      ],
+      hostnames: [args.domain],
+      rules: [
+        {
+          matches: [
             {
-              host: args.domain,
-              http: {
-                paths: [
-                  {
-                    path: "/",
-                    pathType: "Prefix",
-                    backend: {
-                      service: {
-                        name: this.service.metadata.name,
-                        port: {
-                          number: 80,
-                        },
-                      },
-                    },
-                  },
-                ],
+              path: {
+                type: "PathPrefix",
+                value: "/",
               },
             },
           ],
+          backendRefs: [
+            {
+              name: this.service.metadata.name,
+              port: 80,
+            },
+          ],
         },
+      ],
+    };
+
+    // Add ForwardAuth middleware for authentication
+    if (args.auth === AuthType.FORWARD && this.forwardAuthMiddleware) {
+      httpRouteSpec.rules[0].filters = [
+        // CRITICAL: Add headers required by Authelia before ForwardAuth middleware
+        {
+          type: "RequestHeaderModifier",
+          requestHeaderModifier: {
+            set: [
+              {
+                name: "X-Original-URL",
+                value: `https://${args.domain}`,
+              },
+              {
+                name: "X-Original-Method",
+                value: "GET",
+              },
+            ],
+          },
+        },
+        // Then apply ForwardAuth middleware
+        {
+          type: "ExtensionRef",
+          extensionRef: {
+            group: "traefik.io",
+            kind: "Middleware",
+            name: this.forwardAuthMiddleware?.metadata.name || "auth-demo-forwardauth",
+          },
+        },
+      ];
+    }
+
+    // Create Gateway API HTTPRoute
+    this.httpRoute = new k8s.apiextensions.CustomResource(
+      `${name}-httproute`,
+      {
+        apiVersion: "gateway.networking.k8s.io/v1",
+        kind: "HTTPRoute",
+        metadata: {
+          name: name,
+          namespace: namespace.metadata.name,
+          annotations: hasTLS
+            ? {
+                "cert-manager.io/cluster-issuer": tlsIssuerName,
+              }
+            : {},
+        },
+        spec: httpRouteSpec,
       },
       {
         ...childOpts,
-        dependsOn: ingressDeps,
+        dependsOn: httpRouteDeps,
       }
     );
 
@@ -637,7 +586,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     this.registerOutputs({
       deploymentName: this.deployment.metadata.name,
       serviceName: this.service.metadata.name,
-      ingressName: this.ingress.metadata.name,
+      httpRouteName: this.httpRoute.metadata.name,
+      forwardAuthMiddlewareName: this.forwardAuthMiddleware?.metadata.name,
       domain: args.domain,
       dnsRecordId: this.dnsRecord?.id,
     });

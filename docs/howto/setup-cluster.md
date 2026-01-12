@@ -60,7 +60,7 @@ homelab   Ready    control-plane,master   30s   v1.28.x+k3s1
 ### Installation Options Explained
 
 - `--write-kubeconfig-mode 644` - Makes kubeconfig readable without sudo
-- `--disable traefik` - We use ingress-nginx instead for better Pulumi integration
+- `--disable traefik` - We use Traefik Gateway API via Helm instead of built-in Traefik for Gateway API support
 - `--secrets-encryption` - **Encrypts all secrets at rest in etcd** (CRITICAL for security)
 
 ### Why Enable Secrets Encryption?
@@ -431,7 +431,7 @@ Pulumi will show a preview of resources to create:
 Previewing update (dev):
   + pulumi:pulumi:Stack                  homelab-dev          create
   + ├─ kubernetes:helm.sh/v3:Chart      cert-manager         create
-  + ├─ kubernetes:helm.sh/v3:Chart      ingress-nginx        create
+  + ├─ kubernetes:helm.sh/v3:Release    traefik-gateway      create
   + ├─ cloudflare:index:Tunnel          homelab-tunnel       create
   + ├─ kubernetes:apps/v1:Deployment    cloudflared          create
   + └─ ... (~30-40 resources total)
@@ -448,7 +448,7 @@ Type `yes` and press Enter.
 
 ```
   +  cert-manager:helm                   created
-  +  ingress-nginx:helm                  created
+  +  traefik-gateway:helm               created
   +  cloudflared:deployment              created
      ...
 ```
@@ -479,7 +479,7 @@ kubectl get pods -A
 # NAMESPACE     NAME                              READY   STATUS
 # kube-system   ...                               1/1     Running
 # cert-manager  cert-manager-xxx                  1/1     Running
-# ingress-nginx ingress-nginx-controller-xxx      1/1     Running
+# traefik-system traefik-6b671a60-xxxx              1/1     Running
 # cloudflare    cloudflared-xxx                   1/1     Running
 
 # Check Cloudflare Tunnel is connected
@@ -492,7 +492,7 @@ kubectl logs -n cloudflare deployment/cloudflared
 
 **Core Infrastructure:**
 - **cert-manager** - Automatic TLS certificates from Let's Encrypt
-- **ingress-nginx** - HTTP(S) routing and load balancing
+- **Traefik Gateway API** - HTTP(S) routing and load balancing with ForwardAuth
 - **cloudflared** - Cloudflare Tunnel agent (maintains connection to Cloudflare)
 - **external-secrets** - External Secrets Operator for centralized secret management
 - **democratic-csi** (if NFS configured) - Dynamic storage provisioning

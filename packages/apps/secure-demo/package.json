@@ -1,0 +1,19 @@
+{
+  "name": "@mrsimpson/homelab-app-secure-demo",
+  "version": "1.0.0",
+  "description": "Secure demo application protected by Authelia forward authentication",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@mrsimpson/homelab-config": "*",
+    "@mrsimpson/homelab-core-components": "*",
+    "@pulumi/pulumi": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

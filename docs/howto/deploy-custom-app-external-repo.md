@@ -285,6 +285,201 @@ docker rm my-app-test
 
 ---
 
+## Step 3.5: Local Development and Build Script (Optional)
+
+For local development and testing, you can create a comprehensive build script that handles the entire build-test-push workflow locally. This is especially useful during development or when you need to build images manually.
+
+### 3.5.1 Create Local Build Script
+
+**`build.sh`**:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Configuration
+APP_NAME="my-custom-app"
+REGISTRY="${REGISTRY:-ghcr.io/your-username}"
+IMAGE_NAME="${REGISTRY}/${APP_NAME}"
+VERSION="${VERSION:-latest}"
+PLATFORMS="${PLATFORMS:-linux/amd64}"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_step() {
+    echo -e "${BLUE}[STEP]${NC} $1"
+}
+
+# ============================================================================
+# Step 0: Authenticate to GHCR (if pushing)
+# ============================================================================
+if [[ "${PUSH:-false}" == "true" ]]; then
+    log_step "Authenticating to GHCR..."
+
+    if command -v gh &> /dev/null; then
+        # Use GitHub CLI if available
+        log_info "Using GitHub CLI for authentication..."
+        GH_TOKEN=$(gh auth token 2>/dev/null || true)
+        GH_USER=$(gh api user -q .login 2>/dev/null || true)
+
+        if [[ -n "${GH_TOKEN}" && -n "${GH_USER}" ]]; then
+            echo "${GH_TOKEN}" | docker login ghcr.io -u "${GH_USER}" --password-stdin
+            log_info "✓ Authenticated via GitHub CLI"
+        fi
+    elif [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_USERNAME:-}" ]]; then
+        # Use environment variables
+        log_info "Using GITHUB_TOKEN and GITHUB_USERNAME..."
+        echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_USERNAME}" --password-stdin
+        log_info "✓ Authenticated via environment variables"
+    else
+        log_error "Please run: docker login ghcr.io"
+        exit 1
+    fi
+fi
+
+# ============================================================================
+# Step 1: Build the Docker image
+# ============================================================================
+log_step "Building Docker image..."
+docker build \
+    --platform "${PLATFORMS}" \
+    --tag "${IMAGE_NAME}:${VERSION}" \
+    --tag "${IMAGE_NAME}:$(git rev-parse --short HEAD 2>/dev/null || echo 'dev')" \
+    .
+
+log_info "✓ Image built: ${IMAGE_NAME}:${VERSION}"
+
+# ============================================================================
+# Step 2: Run Trivy scan (if available)
+# ============================================================================
+if command -v trivy &> /dev/null; then
+    log_step "Scanning image with Trivy..."
+    trivy image \
+        --severity HIGH,CRITICAL \
+        --format table \
+        "${IMAGE_NAME}:${VERSION}"
+    
+    if trivy image --severity CRITICAL --exit-code 1 --ignore-unfixed "${IMAGE_NAME}:${VERSION}" 2>/dev/null; then
+        log_info "✓ No critical vulnerabilities found"
+    else
+        log_warn "⚠ Critical vulnerabilities detected!"
+        if [[ "${FAIL_ON_VULN:-false}" == "true" ]]; then
+            exit 1
+        fi
+    fi
+else
+    log_warn "Trivy not found, skipping vulnerability scan"
+    log_warn "Install with: brew install trivy (macOS) or apt install trivy (Linux)"
+fi
+
+# ============================================================================
+# Step 3: Test the image locally
+# ============================================================================
+log_step "Testing image..."
+if [[ "${SKIP_TEST:-false}" != "true" ]]; then
+    CONTAINER_ID=$(docker run -d --rm -p 3000:3000 "${IMAGE_NAME}:${VERSION}")
+    sleep 3
+
+    if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+        log_info "✓ Health check passed"
+    else
+        log_error "✗ Health check failed"
+        docker logs "${CONTAINER_ID}"
+        docker stop "${CONTAINER_ID}"
+        exit 1
+    fi
+
+    docker stop "${CONTAINER_ID}" > /dev/null
+    log_info "✓ Container test completed"
+else
+    log_warn "Skipping tests (SKIP_TEST=true)"
+fi
+
+# ============================================================================
+# Step 4: Push to registry (optional)
+# ============================================================================
+if [[ "${PUSH:-false}" == "true" ]]; then
+    log_step "Pushing to registry..."
+    docker push "${IMAGE_NAME}:${VERSION}"
+    
+    GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo 'dev')
+    if [[ "${GIT_SHA}" != "dev" ]]; then
+        docker push "${IMAGE_NAME}:${GIT_SHA}"
+    fi
+    
+    log_info "✓ Pushed to ${IMAGE_NAME}:${VERSION}"
+else
+    log_warn "Skipping push (use PUSH=true to push)"
+    echo "To push manually: docker push ${IMAGE_NAME}:${VERSION}"
+fi
+
+log_info "🎉 Build complete!"
+echo "Image: ${IMAGE_NAME}:${VERSION}"
+echo "Next steps:"
+echo "  1. Run locally:  docker run -p 3000:3000 ${IMAGE_NAME}:${VERSION}"
+echo "  2. Deploy:       cd deployment && pulumi up"
+echo "  3. Access:       https://${APP_NAME}.yourdomain.com"
+```
+
+### 3.5.2 Make Script Executable and Use It
+
+```bash
+# Make script executable
+chmod +x build.sh
+
+# Build locally only
+./build.sh
+
+# Build and test with custom settings
+VERSION=v1.0.0 REGISTRY=ghcr.io/myusername ./build.sh
+
+# Build, test, and push to registry
+PUSH=true ./build.sh
+
+# Build with strict vulnerability checking
+FAIL_ON_VULN=true ./build.sh
+
+# Skip tests (faster iteration during development)
+SKIP_TEST=true ./build.sh
+```
+
+### 3.5.3 Environment Variables
+
+The build script supports these environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_NAME` | `my-custom-app` | Application name |
+| `REGISTRY` | `ghcr.io/your-username` | Container registry |
+| `VERSION` | `latest` | Image version tag |
+| `PLATFORMS` | `linux/amd64` | Build platforms |
+| `PUSH` | `false` | Push to registry after build |
+| `SKIP_TEST` | `false` | Skip local testing |
+| `FAIL_ON_VULN` | `false` | Fail build on critical vulnerabilities |
+| `GITHUB_TOKEN` | - | GitHub token for GHCR auth |
+| `GITHUB_USERNAME` | - | GitHub username for GHCR auth |
+
+This script provides a complete local development workflow including building, security scanning, testing, and publishing - perfect for development and testing before committing to GitHub Actions.
+
+---
+
 ## Step 4: Create GitHub Actions Workflow
 
 **`.github/workflows/build-and-push.yml`**:

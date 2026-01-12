@@ -4,20 +4,19 @@
  * Reusable Pulumi components for homelab infrastructure
  */
 
-export { ExposedWebApp } from "./ExposedWebApp";
+export { ExposedWebApp, AuthType } from "./ExposedWebApp";
 export { HomelabContext } from "./homelab-context";
 export {
-	createGhcrImagePullSecret,
-	createDockerHubImagePullSecret,
+  createGhcrImagePullSecret,
+  createDockerHubImagePullSecret,
 } from "./registry-secrets";
 export type {
-	ExposedWebAppArgs,
-	OAuthConfig,
-	StorageConfig,
-	CloudflareConfig,
-	TLSConfig,
-	IngressConfig,
-	ExternalSecretsConfig,
+  ExposedWebAppArgs,
+  StorageConfig,
+  CloudflareConfig,
+  TLSConfig,
+  GatewayApiConfig,
+  ExternalSecretsConfig,
 } from "./ExposedWebApp";
 export type { HomelabContextConfig } from "./homelab-context";
 export type { CreateImagePullSecretArgs } from "./registry-secrets";

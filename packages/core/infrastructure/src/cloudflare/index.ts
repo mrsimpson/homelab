@@ -3,7 +3,7 @@ import * as cloudflare from "@pulumi/cloudflare";
 import * as k8s from "@pulumi/kubernetes";
 import * as random from "@pulumi/random";
 import { homelabConfig } from "@mrsimpson/homelab-config";
-import { ingressNginx } from "../ingress-nginx";
+import { traefik } from "../traefik-gateway";
 
 /**
  * Cloudflare Tunnel - Secure ingress without port forwarding
@@ -12,6 +12,7 @@ import { ingressNginx } from "../ingress-nginx";
  * - Cloudflare Tunnel (persistent connection to Cloudflare)
  * - cloudflared deployment in Kubernetes
  * - Tunnel credentials as Kubernetes Secret
+ * - Routes traffic to Traefik Gateway API controller
  */
 
 // Generate tunnel secret
@@ -48,33 +49,33 @@ export const cloudflaredNamespace = new k8s.core.v1.Namespace("cloudflare", {
   },
 });
 
-// Create a Service alias for ingress-nginx controller
+// Create a Service alias for traefik controller
 // This solves the problem of Helm generating dynamic service names
-// We create a simple Service that selects the ingress-nginx controller pods
+// We create a simple Service that selects the traefik controller pods
 // and expose it as a predictable name that cloudflared can reference
-const ingressNginxAlias = new k8s.core.v1.Service(
-  "ingress-nginx-controller",
+const traefikAlias = new k8s.core.v1.Service(
+  "traefik-controller",
   {
     metadata: {
-      name: "ingress-nginx-controller",
-      namespace: "ingress-nginx",
+      name: "traefik-controller",
+      namespace: "traefik-system",
     },
     spec: {
       selector: {
-        "app.kubernetes.io/name": "ingress-nginx",
-        "app.kubernetes.io/component": "controller",
+        "app.kubernetes.io/name": "traefik",
+        "app.kubernetes.io/instance": traefik.name.apply((name) => `${name}-traefik-system`),
       },
       ports: [
         {
-          name: "http",
+          name: "web",
           port: 80,
-          targetPort: 80,
+          targetPort: 8000,
           protocol: "TCP",
         },
         {
-          name: "https",
+          name: "websecure",
           port: 443,
-          targetPort: 443,
+          targetPort: 8443,
           protocol: "TCP",
         },
       ],
@@ -82,7 +83,7 @@ const ingressNginxAlias = new k8s.core.v1.Service(
     },
   },
   {
-    dependsOn: [ingressNginx],
+    dependsOn: [traefik],
   }
 );
 
@@ -99,15 +100,15 @@ const tunnelConfig = new k8s.core.v1.ConfigMap(
       "config.yaml": `tunnel: homelab-k3s
 credentials-file: /etc/cloudflared/creds/credentials.json
 
-# Route all traffic to ingress-nginx controller
-# The ingress controller will handle hostname-based routing
+# Route all traffic to Traefik Gateway controller
+# The Gateway API will handle hostname-based routing
 ingress:
-  - service: http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80
+  - service: http://traefik-controller.traefik-system.svc.cluster.local:80
 `,
     },
   },
   {
-    dependsOn: [cloudflaredNamespace, ingressNginxAlias], // Depend on the alias service
+    dependsOn: [cloudflaredNamespace, traefikAlias], // Depend on the alias service
   }
 );
 

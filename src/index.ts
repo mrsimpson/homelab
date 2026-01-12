@@ -52,6 +52,7 @@ export const tunnelCname = baseInfra.cloudflare.tunnelCname;
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
+import { AuthType } from "@mrsimpson/homelab-core-components";
 
 const helloWorldApp = createHelloWorld(homelab);
 export const helloWorldUrl = helloWorldApp.url;
@@ -72,6 +73,16 @@ export const storageValidatorApp = homelab.createExposedWebApp("storage-validato
   tags: ["storage", "validation", "persistent", "longhorn", "backup"],
 });
 export const storageValidatorUrl = "https://storage-validator.no-panic.org";
+
+// Auth Demo App - Simple nginx app to test forward authentication
+export const authDemoApp = homelab.createExposedWebApp("auth-demo", {
+  image: "nginxinc/nginx-unprivileged:alpine",
+  domain: "auth-demo.no-panic.org",
+  port: 8080,
+  auth: AuthType.FORWARD, // 🔒 Protected by Authelia forward auth
+  tags: ["auth", "demo", "security", "authelia"],
+});
+export const authDemoUrl = "https://auth-demo.no-panic.org";
 
 // Longhorn UI - Management interface for storage system
 // Note: Using portforwarding instead of Ingress to avoid webhook validation race conditions

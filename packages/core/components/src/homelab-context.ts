@@ -4,7 +4,7 @@ import type {
   CloudflareConfig,
   ExposedWebAppArgs,
   ExternalSecretsConfig,
-  IngressConfig,
+  GatewayApiConfig,
   TLSConfig,
 } from "./ExposedWebApp";
 import { ExposedWebApp } from "./ExposedWebApp";
@@ -18,7 +18,7 @@ import { ExposedWebApp } from "./ExposedWebApp";
 export interface HomelabContextConfig {
   cloudflare?: CloudflareConfig;
   tls?: TLSConfig;
-  ingress?: IngressConfig;
+  gatewayApi?: GatewayApiConfig;
   externalSecrets?: ExternalSecretsConfig;
   namespaces?: Record<string, k8s.core.v1.Namespace>;
 }
@@ -31,7 +31,7 @@ export class HomelabContext {
    */
   createExposedWebApp(
     name: string,
-    args: Omit<ExposedWebAppArgs, "cloudflare" | "tls" | "ingress" | "externalSecrets">,
+    args: Omit<ExposedWebAppArgs, "cloudflare" | "tls" | "gatewayApi" | "externalSecrets">,
     opts?: pulumi.ComponentResourceOptions
   ): ExposedWebApp {
     return new ExposedWebApp(
@@ -40,7 +40,7 @@ export class HomelabContext {
         ...args,
         cloudflare: this.config.cloudflare,
         tls: this.config.tls,
-        ingress: this.config.ingress,
+        gatewayApi: this.config.gatewayApi,
         externalSecrets: this.config.externalSecrets,
       },
       opts
