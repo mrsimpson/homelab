@@ -92,9 +92,55 @@ Or extend `packages/core/infrastructure/` for reusable modules.
 
 ## Documentation
 
+- **[OAuth2-Proxy Authentication](./docs/OAUTH2_PROXY.md)** - GitHub-based authentication system
+- **[OAuth2-Proxy Examples](./docs/OAUTH2_PROXY_EXAMPLES.md)** - Step-by-step usage examples
 - **[ADRs](./docs/adr/)** - Architecture decisions
 - **[How-To Guides](./docs/howto/)** - Setup, deployment, operations
 - **[Security Review](./docs/CRITICAL-REVIEW.md)** - Security assessment
+
+## Authentication Systems
+
+This homelab provides two independent authentication systems:
+
+### OAuth2-Proxy (GitHub OAuth)
+Protect routes with GitHub authentication for:
+- External developers and contributors
+- Public/semi-public applications
+- Email-based allowlists
+
+See: [OAuth2-Proxy Guide](./docs/OAUTH2_PROXY.md)
+
+### Authelia (Local & LDAP)
+Protect routes with local user accounts for:
+- Internal tools and dashboards
+- Service accounts and automation
+- MFA and advanced policies
+
+**Note**: Routes use **one or the other**, never both. Choose based on your needs.
+
+## Quick Reference: Protecting a Route
+
+**With OAuth2-Proxy** (GitHub users):
+```yaml
+filters:
+  - type: ExtensionRef
+    extensionRef:
+      group: traefik.io
+      kind: Middleware
+      name: forwardauth-oauth2-users
+      namespace: oauth2-proxy  # Note: different namespace!
+```
+
+**With Authelia** (Local accounts):
+```yaml
+filters:
+  - type: ExtensionRef
+    extensionRef:
+      group: traefik.io
+      kind: Middleware
+      name: forwardauth-authelia
+      namespace: traefik-system
+```
 
 ## Requirements
 

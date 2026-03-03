@@ -44,6 +44,8 @@ export const traefik = new k8s.helm.v3.Release(
         },
         kubernetesCRD: {
           enabled: true, // Keep CRD support for migration compatibility
+          allowCrossNamespace: true, // Allow HTTPRoutes in app namespaces to reference middlewares in oauth2-proxy namespace
+          allowExternalNameServices: true, // Allow ExternalName services (used by oauth2-proxy errors middleware)
         },
       },
       // Match k3s + hostPort pattern like ingress-nginx

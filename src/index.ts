@@ -49,6 +49,11 @@ logBackupStatus();
 export const tunnelId = baseInfra.cloudflare.tunnelId;
 export const tunnelCname = baseInfra.cloudflare.tunnelCname;
 
+// OAuth2-Proxy - GitHub authentication proxy
+import { releases as oauth2ProxyReleases } from "@mrsimpson/homelab-core-infrastructure";
+
+export const oauth2ProxyInstances = oauth2ProxyReleases;
+
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
@@ -83,6 +88,17 @@ export const authDemoApp = homelab.createExposedWebApp("auth-demo", {
   tags: ["auth", "demo", "security", "authelia"],
 });
 export const authDemoUrl = "https://auth-demo.no-panic.org";
+
+// OAuth2 Demo App - Simple nginx app to test OAuth2-Proxy GitHub authentication
+export const oauth2DemoApp = homelab.createExposedWebApp("oauth2-demo", {
+  image: "nginxinc/nginx-unprivileged:alpine",
+  domain: "oauth2-demo.no-panic.org",
+  port: 8080,
+  auth: AuthType.OAUTH2_PROXY, // 🔒 Protected by OAuth2-Proxy (GitHub)
+  oauth2Proxy: { group: "users" },
+  tags: ["auth", "demo", "security", "oauth2-proxy", "github"],
+});
+export const oauth2DemoUrl = "https://oauth2-demo.no-panic.org";
 
 // Longhorn UI - Management interface for storage system
 // Note: Using portforwarding instead of Ingress to avoid webhook validation race conditions
