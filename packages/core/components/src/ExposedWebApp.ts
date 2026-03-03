@@ -45,6 +45,8 @@ export enum AuthType {
   NONE = "none",
   /** Authelia forward authentication via Traefik ForwardAuth middleware */
   FORWARD = "forward",
+  /** OAuth2-Proxy authentication via GitHub OAuth (uses IngressRoute instead of HTTPRoute) */
+  OAUTH2_PROXY = "oauth2",
 }
 
 export interface StorageConfig {
@@ -85,6 +87,13 @@ export interface ExternalSecretsConfig {
   operator?: pulumi.Resource;
   /** ClusterSecretStore name (defaults to "pulumi-esc") */
   storeName?: string;
+}
+
+export interface OAuth2ProxyConfig {
+  /** Which oauth2-proxy group to use (defaults to "users") */
+  group?: string;
+  /** Namespace where oauth2-proxy is deployed (defaults to "oauth2-proxy") */
+  namespace?: string;
 }
 
 export interface ExposedWebAppArgs {
@@ -129,12 +138,15 @@ export interface ExposedWebAppArgs {
   gatewayApi?: GatewayApiConfig;
   /** External Secrets Operator configuration */
   externalSecrets?: ExternalSecretsConfig;
+  /** OAuth2-Proxy configuration (required when auth is OAUTH2_PROXY) */
+  oauth2Proxy?: OAuth2ProxyConfig;
 }
 
 export class ExposedWebApp extends pulumi.ComponentResource {
   public readonly deployment: k8s.apps.v1.Deployment;
   public readonly service: k8s.core.v1.Service;
-  public readonly httpRoute: k8s.apiextensions.CustomResource;
+  /** Route resource(s): single HTTPRoute (Authelia/NONE) or IngressRoute[] (OAuth2-Proxy) */
+  public readonly route: k8s.apiextensions.CustomResource | k8s.apiextensions.CustomResource[];
   public readonly forwardAuthMiddleware?: k8s.apiextensions.CustomResource;
   public readonly dnsRecord?: cloudflare.Record;
   public readonly pvc?: k8s.core.v1.PersistentVolumeClaim;
@@ -426,145 +438,307 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       { ...childOpts, dependsOn: [this.deployment] }
     );
 
-    // Gateway API configuration values
-    const gatewayName = args.gatewayApi?.gatewayName || "homelab-gateway";
-    const gatewayNamespace = args.gatewayApi?.gatewayNamespace || "traefik-system";
+    // --- Routing & Authentication ---
+    // OAuth2-Proxy uses IngressRoute (Traefik CRD) for reliable cross-namespace support
+    // Authelia and NONE use Gateway API HTTPRoute
 
-    // Build Gateway API dependencies
-    const httpRouteDeps: pulumi.Resource[] = [this.service];
-    if (args.gatewayApi?.controller) {
-      httpRouteDeps.push(args.gatewayApi.controller);
-    }
-    if (args.tls?.clusterIssuer) {
-      httpRouteDeps.push(args.tls.clusterIssuer);
-    }
+    if (args.auth === AuthType.OAUTH2_PROXY) {
+      // --- OAuth2-Proxy: IngressRoute-based routing ---
+      const oauth2Group = args.oauth2Proxy?.group || "users";
+      const oauth2Namespace = args.oauth2Proxy?.namespace || "oauth2-proxy";
+      const oauth2ProxyServiceAddress = `http://oauth2-proxy-${oauth2Group}.${oauth2Namespace}.svc.cluster.local/oauth2/auth`;
 
-    // Create ForwardAuth middleware in application namespace if authentication is enabled
-    if (args.auth === AuthType.FORWARD) {
+      // ForwardAuth middleware - checks session via /oauth2/auth
       this.forwardAuthMiddleware = new k8s.apiextensions.CustomResource(
-        `${name}-forwardauth`,
+        `${name}-oauth2-forwardauth`,
         {
           apiVersion: "traefik.io/v1alpha1",
           kind: "Middleware",
           metadata: {
-            name: `${name}-forwardauth`,
+            name: `${name}-oauth2-forwardauth`,
             namespace: namespace.metadata.name,
           },
           spec: {
             forwardAuth: {
-              address: "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
+              address: oauth2ProxyServiceAddress,
               trustForwardHeader: true,
-              // Required headers for Authelia authentication (fixes HTTP scheme issue)
-              authRequestHeaders: [
-                "X-Original-URL",
-                "X-Original-Method",
-                "X-Forwarded-Host",
-                "X-Forwarded-Proto",
-                "X-Forwarded-Uri",
-                "Accept",
-                "Authorization",
-                "Cookie",
+              // CRITICAL: Forward Cookie header so oauth2-proxy can see the session
+              authRequestHeaders: ["Cookie", "Authorization"],
+              authResponseHeaders: [
+                "X-Auth-Request-User",
+                "X-Auth-Request-Email",
+                "X-Auth-Request-Groups",
+                "Set-Cookie",
               ],
-              authResponseHeaders: ["Remote-User", "Remote-Groups", "Remote-Name", "Remote-Email"],
             },
           },
+        },
+        { ...childOpts, dependsOn: [this.service] }
+      );
+
+      // Use shared redirect service from oauth2-proxy namespace
+      // This eliminates per-app ConfigMap + Deployment + Service (3 resources saved!)
+
+      // Errors middleware - catches 401 and serves redirect page from shared service
+      const errorsMiddleware = new k8s.apiextensions.CustomResource(
+        `${name}-oauth2-errors`,
+        {
+          apiVersion: "traefik.io/v1alpha1",
+          kind: "Middleware",
+          metadata: {
+            name: `${name}-oauth2-errors`,
+            namespace: namespace.metadata.name,
+          },
+          spec: {
+              errors: {
+              status: ["401"],
+              service: {
+                // Use ExternalName service to reference shared redirect service in oauth2-proxy namespace
+                name: "oauth2-shared-redirect",
+                namespace: "oauth2-proxy",
+                port: 80,
+              },
+              query: pulumi.interpolate`/?rd=https://${args.domain}{url}`,
+            },
+          },
+        },
+        { ...childOpts, dependsOn: [this.service] }
+      );
+
+      // Chain middleware - errors wraps forwardauth
+      const chainMiddleware = new k8s.apiextensions.CustomResource(
+        `${name}-oauth2-chain`,
+        {
+          apiVersion: "traefik.io/v1alpha1",
+          kind: "Middleware",
+          metadata: {
+            name: `${name}-oauth2-chain`,
+            namespace: namespace.metadata.name,
+          },
+          spec: {
+            chain: {
+              middlewares: [
+                { name: `${name}-oauth2-errors` },
+                { name: `${name}-oauth2-forwardauth` },
+              ],
+            },
+          },
+        },
+        { ...childOpts, dependsOn: [errorsMiddleware, this.forwardAuthMiddleware] }
+      );
+
+      // IngressRoute 1: /oauth2/* → oauth2-proxy (unprotected, handles sign-in flow)
+      const signinRoute = new k8s.apiextensions.CustomResource(
+        `${name}-oauth2-signin-route`,
+        {
+          apiVersion: "traefik.io/v1alpha1",
+          kind: "IngressRoute",
+          metadata: {
+            name: `${name}-oauth2-signin`,
+            namespace: namespace.metadata.name,
+          },
+          spec: {
+            // Use "web" entryPoint: Cloudflare terminates TLS, traffic arrives as HTTP
+            entryPoints: ["web"],
+            routes: [
+              {
+                match: pulumi.interpolate`Host(\`${args.domain}\`) && PathPrefix(\`/oauth2/\`)`,
+                kind: "Rule",
+                services: [
+                  {
+                    name: `oauth2-proxy-${oauth2Group}`,
+                    namespace: oauth2Namespace,
+                    port: 80,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        { ...childOpts, dependsOn: [namespace] }
+      );
+
+      // IngressRoute 2: /* → app backend (protected by middleware chain)
+      const appRoute = new k8s.apiextensions.CustomResource(
+        `${name}-oauth2-app-route`,
+        {
+          apiVersion: "traefik.io/v1alpha1",
+          kind: "IngressRoute",
+          metadata: {
+            name: `${name}-oauth2-app`,
+            namespace: namespace.metadata.name,
+          },
+          spec: {
+            entryPoints: ["web"],
+            routes: [
+              {
+                match: pulumi.interpolate`Host(\`${args.domain}\`)`,
+                kind: "Rule",
+                middlewares: [
+                  {
+                    name: `${name}-oauth2-chain`,
+                    namespace: namespace.metadata.name,
+                  },
+                ],
+                services: [
+                  {
+                    name: this.service.metadata.name,
+                    port: 80,
+                  },
+                ],
+                priority: 1, // Lower priority than /oauth2/* route
+              },
+            ],
+          },
+        },
+        { ...childOpts, dependsOn: [this.service, chainMiddleware, signinRoute] }
+      );
+
+      this.route = [signinRoute, appRoute];
+    } else {
+      // --- Authelia / NONE: Gateway API HTTPRoute ---
+
+      const gatewayName = args.gatewayApi?.gatewayName || "homelab-gateway";
+      const gatewayNamespace = args.gatewayApi?.gatewayNamespace || "traefik-system";
+
+      // Build Gateway API dependencies
+      const httpRouteDeps: pulumi.Resource[] = [this.service];
+      if (args.gatewayApi?.controller) {
+        httpRouteDeps.push(args.gatewayApi.controller);
+      }
+      if (args.tls?.clusterIssuer) {
+        httpRouteDeps.push(args.tls.clusterIssuer);
+      }
+
+      // Create ForwardAuth middleware for Authelia
+      if (args.auth === AuthType.FORWARD) {
+        this.forwardAuthMiddleware = new k8s.apiextensions.CustomResource(
+          `${name}-forwardauth`,
+          {
+            apiVersion: "traefik.io/v1alpha1",
+            kind: "Middleware",
+            metadata: {
+              name: `forwardauth`,
+              namespace: namespace.metadata.name,
+            },
+            spec: {
+              forwardAuth: {
+                address:
+                  "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
+                trustForwardHeader: true,
+                authRequestHeaders: [
+                  "X-Original-URL",
+                  "X-Original-Method",
+                  "X-Forwarded-Host",
+                  "X-Forwarded-Proto",
+                  "X-Forwarded-Uri",
+                  "Accept",
+                  "Authorization",
+                  "Cookie",
+                ],
+                authResponseHeaders: [
+                  "Remote-User",
+                  "Remote-Groups",
+                  "Remote-Name",
+                  "Remote-Email",
+                ],
+              },
+            },
+          },
+          {
+            ...childOpts,
+            dependsOn: httpRouteDeps,
+          }
+        );
+
+        httpRouteDeps.push(this.forwardAuthMiddleware);
+      }
+
+      // Determine TLS configuration
+      const tlsIssuerName = args.tls?.clusterIssuerName || "letsencrypt-prod";
+      const hasTLS = args.tls?.clusterIssuer || args.tls?.clusterIssuerName;
+
+      // Build HTTPRoute spec
+      const httpRouteSpec: any = {
+        parentRefs: [
+          {
+            name: gatewayName,
+            namespace: gatewayNamespace,
+          },
+        ],
+        hostnames: [args.domain],
+        rules: [
+          {
+            matches: [
+              {
+                path: {
+                  type: "PathPrefix",
+                  value: "/",
+                },
+              },
+            ],
+            backendRefs: [
+              {
+                name: this.service.metadata.name,
+                port: 80,
+              },
+            ],
+          },
+        ],
+      };
+
+      // Add ForwardAuth middleware for Authelia authentication
+      if (args.auth === AuthType.FORWARD && this.forwardAuthMiddleware) {
+        httpRouteSpec.rules[0].filters = [
+          {
+            type: "RequestHeaderModifier",
+            requestHeaderModifier: {
+              set: [
+                {
+                  name: "X-Original-URL",
+                  value: `https://${args.domain}`,
+                },
+                {
+                  name: "X-Original-Method",
+                  value: "GET",
+                },
+              ],
+            },
+          },
+          {
+            type: "ExtensionRef",
+            extensionRef: {
+              group: "traefik.io",
+              kind: "Middleware",
+              name: this.forwardAuthMiddleware.metadata.name,
+            },
+          },
+        ];
+      }
+
+      // Create Gateway API HTTPRoute
+      this.route = new k8s.apiextensions.CustomResource(
+        `${name}-httproute`,
+        {
+          apiVersion: "gateway.networking.k8s.io/v1",
+          kind: "HTTPRoute",
+          metadata: {
+            name: name,
+            namespace: namespace.metadata.name,
+            annotations: hasTLS
+              ? {
+                  "cert-manager.io/cluster-issuer": tlsIssuerName,
+                }
+              : {},
+          },
+          spec: httpRouteSpec,
         },
         {
           ...childOpts,
           dependsOn: httpRouteDeps,
         }
       );
-
-      // Add the middleware to dependencies for HTTPRoute
-      httpRouteDeps.push(this.forwardAuthMiddleware);
     }
-
-    // Determine TLS configuration
-    const tlsIssuerName = args.tls?.clusterIssuerName || "letsencrypt-prod";
-    const hasTLS = args.tls?.clusterIssuer || args.tls?.clusterIssuerName;
-
-    // Build HTTPRoute spec
-    const httpRouteSpec: any = {
-      parentRefs: [
-        {
-          name: gatewayName,
-          namespace: gatewayNamespace,
-        },
-      ],
-      hostnames: [args.domain],
-      rules: [
-        {
-          matches: [
-            {
-              path: {
-                type: "PathPrefix",
-                value: "/",
-              },
-            },
-          ],
-          backendRefs: [
-            {
-              name: this.service.metadata.name,
-              port: 80,
-            },
-          ],
-        },
-      ],
-    };
-
-    // Add ForwardAuth middleware for authentication
-    if (args.auth === AuthType.FORWARD && this.forwardAuthMiddleware) {
-      httpRouteSpec.rules[0].filters = [
-        // CRITICAL: Add headers required by Authelia before ForwardAuth middleware
-        {
-          type: "RequestHeaderModifier",
-          requestHeaderModifier: {
-            set: [
-              {
-                name: "X-Original-URL",
-                value: `https://${args.domain}`,
-              },
-              {
-                name: "X-Original-Method",
-                value: "GET",
-              },
-            ],
-          },
-        },
-        // Then apply ForwardAuth middleware
-        {
-          type: "ExtensionRef",
-          extensionRef: {
-            group: "traefik.io",
-            kind: "Middleware",
-            name: this.forwardAuthMiddleware?.metadata.name || "auth-demo-forwardauth",
-          },
-        },
-      ];
-    }
-
-    // Create Gateway API HTTPRoute
-    this.httpRoute = new k8s.apiextensions.CustomResource(
-      `${name}-httproute`,
-      {
-        apiVersion: "gateway.networking.k8s.io/v1",
-        kind: "HTTPRoute",
-        metadata: {
-          name: name,
-          namespace: namespace.metadata.name,
-          annotations: hasTLS
-            ? {
-                "cert-manager.io/cluster-issuer": tlsIssuerName,
-              }
-            : {},
-        },
-        spec: httpRouteSpec,
-      },
-      {
-        ...childOpts,
-        dependsOn: httpRouteDeps,
-      }
-    );
 
     // Optional: Create Cloudflare DNS record
     if (args.cloudflare) {
@@ -586,7 +760,9 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     this.registerOutputs({
       deploymentName: this.deployment.metadata.name,
       serviceName: this.service.metadata.name,
-      httpRouteName: this.httpRoute.metadata.name,
+      routeName: Array.isArray(this.route)
+        ? this.route.map((r) => r.metadata.name)
+        : this.route.metadata.name,
       forwardAuthMiddlewareName: this.forwardAuthMiddleware?.metadata.name,
       domain: args.domain,
       dnsRecordId: this.dnsRecord?.id,

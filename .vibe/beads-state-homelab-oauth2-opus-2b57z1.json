@@ -1,0 +1,29 @@
+{
+  "conversationId": "homelab-oauth2-opus-2b57z1",
+  "projectPath": "/Users/oliverjaegle/projects/privat/homelab",
+  "epicId": "homelab-1",
+  "phaseTasks": [
+    {
+      "phaseId": "explore",
+      "phaseName": "Explore",
+      "taskId": "homelab-1.1"
+    },
+    {
+      "phaseId": "plan",
+      "phaseName": "Plan",
+      "taskId": "homelab-1.2"
+    },
+    {
+      "phaseId": "code",
+      "phaseName": "Code",
+      "taskId": "homelab-1.3"
+    },
+    {
+      "phaseId": "commit",
+      "phaseName": "Commit",
+      "taskId": "homelab-1.4"
+    }
+  ],
+  "createdAt": "2026-02-08T08:47:19.078Z",
+  "updatedAt": "2026-02-08T08:47:19.078Z"
+}

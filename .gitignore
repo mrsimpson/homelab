@@ -37,3 +37,4 @@ secrets/
 *.tmp
 .cache/
 .k3s-backup
+.crowd
