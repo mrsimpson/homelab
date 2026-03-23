@@ -3,38 +3,60 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 
 /**
- * ExposedWebApp - Reusable component for deploying web applications with secure internet exposure via Gateway API
+ * ExposedWebApp — reusable Pulumi component for deploying web apps with secure internet exposure.
  *
- * This component uses the Gateway API standard for HTTP routing and authentication:
- * - HTTPRoute resources for routing configuration
- * - Traefik ForwardAuth middleware for Authelia integration
- * - Automatic TLS certificate management with cert-manager
- * - Resolves HTTP scheme compatibility issues with Authelia v4.38.0
+ * Handles the full stack: Deployment → Service → HTTPRoute/IngressRoute → TLS → DNS.
  *
- * Automatically configures:
- * - Kubernetes Deployment
- * - Kubernetes Service (ClusterIP)
- * - HTTPRoute with optional ForwardAuth middleware
- * - Optional Cloudflare DNS record
- * - Optional persistent storage
+ * ## Authentication modes
+ * - `AuthType.NONE`         — no auth, public access
+ * - `AuthType.FORWARD`      — Authelia forward-auth via Traefik ForwardAuth middleware
+ * - `AuthType.OAUTH2_PROXY` — GitHub OAuth via the shared oauth2-proxy IngressRoute
  *
- * Example (with infrastructure dependencies):
- *   new ExposedWebApp("blog", {
- *     image: "ghost:5",
- *     domain: "blog.example.com",
- *     port: 2368,
- *     auth: AuthType.FORWARD,
- *     cloudflare: {
- *       zoneId: "abc123",
- *       tunnelCname: "tunnel.example.com"
- *     },
- *     tls: {
- *       clusterIssuer: letsEncryptIssuer
- *     },
- *     gatewayApi: {
- *       controller: traefik
- *     }
- *   });
+ * ## What gets created automatically
+ * - `Namespace` (with Pod Security Standards labels, unless you pass your own)
+ * - `Deployment` + `Service` (ClusterIP)
+ * - `HTTPRoute` or `IngressRoute[]` depending on auth mode
+ * - Optional `PersistentVolumeClaim` (when `storage` is set)
+ * - Optional Cloudflare DNS `Record` (when `cloudflare` is set)
+ * - Optional `ExternalSecret` for GHCR pull credentials (when `imagePullSecrets` references `ghcr-pull-secret`)
+ *
+ * ## Key options
+ *
+ * ### Container overrides
+ * - `command` / `args` — override entrypoint / arguments (e.g. `args: ["web", "--port", "4096"]`)
+ *
+ * ### Extra volumes
+ * - `extraVolumes` / `extraVolumeMounts` — inject additional volumes (ConfigMaps, hostPath, etc.)
+ *   alongside the built-in storage PVC mount.
+ *
+ * ### Node pinning
+ * - `nodeSelector` — pin the pod to specific node(s) by label.
+ *   **Required when using hostPath volumes**, which are node-local by definition.
+ *   Example: `{ "kubernetes.io/hostname": "flinker" }`
+ *
+ * ### Security context
+ * - `securityContext.runAsUser/Group/fsGroup` — UID/GID for the container and volume ownership.
+ * - `securityContext.allowRoot` — set to `true` only when the image genuinely requires UID 0.
+ *   Automatically relaxes the namespace Pod Security Standard from `restricted` to `baseline`.
+ *   Also disables `runAsNonRoot` on the pod and container security contexts.
+ *   Prefer fixing the image to run as non-root instead of using this flag.
+ * - `extraVolumes` with `hostPath` — automatically relaxes the namespace PSS to `privileged`
+ *   (the only level that permits hostPath volumes per the Kubernetes PSS spec).
+ *   The pod itself still runs as non-root with all capabilities dropped.
+ *
+ * ## Example
+ * ```typescript
+ * homelab.createExposedWebApp("blog", {
+ *   image: "ghost:5",
+ *   domain: pulumi.interpolate`blog.${homelabConfig.domain}`,
+ *   port: 2368,
+ *   auth: AuthType.OAUTH2_PROXY,
+ *   storage: { size: "10Gi", mountPath: "/var/lib/ghost/content" },
+ *   nodeSelector: { "kubernetes.io/hostname": "flinker" },
+ *   extraVolumes: [{ name: "cfg", configMap: { name: "blog-config" } }],
+ *   extraVolumeMounts: [{ name: "cfg", mountPath: "/etc/blog" }],
+ * });
+ * ```
  */
 
 /**
@@ -105,6 +127,10 @@ export interface ExposedWebAppArgs {
   port: number;
   /** Number of replicas (defaults to 1) */
   replicas?: number;
+  /** Override the container entrypoint (maps to K8s container.command) */
+  command?: string[];
+  /** Container arguments (maps to K8s container.args) */
+  args?: string[];
   /** Environment variables */
   env?: Array<{ name: string; value: string | pulumi.Output<string> }>;
   /** Authentication type (defaults to "none") */
@@ -125,9 +151,32 @@ export interface ExposedWebAppArgs {
     runAsUser?: number;
     runAsGroup?: number;
     fsGroup?: number;
+    /**
+     * Set to true only when the container image requires root (UID 0) to function.
+     * This disables the `runAsNonRoot` enforcement on both the pod and container security
+     * contexts, and relaxes the namespace Pod Security Standard to "baseline".
+     * Use with caution — prefer fixing the image to run as non-root instead.
+     */
+    allowRoot?: boolean;
   };
   /** Optional pre-created namespace (if not provided, will create one) */
   namespace?: k8s.core.v1.Namespace;
+  /**
+   * Pin the pod to specific node(s) using Kubernetes nodeSelector labels.
+   * Required when using hostPath volumes (which are node-local by definition).
+   * Example: { "kubernetes.io/hostname": "flinker" }
+   */
+  nodeSelector?: Record<string, string>;
+  /** Extra volumes to add to the pod spec (in addition to the optional storage PVC) */
+  extraVolumes?: object[];
+  /** Extra volume mounts to add to the app container (in addition to the optional storage mount) */
+  extraVolumeMounts?: object[];
+  /**
+   * Init containers to run before the main app container starts.
+   * Useful for seeding files into emptyDir volumes or other pre-start setup.
+   * Each entry is a full Kubernetes container spec object.
+   */
+  initContainers?: object[];
 
   // Infrastructure dependencies (all optional)
   /** Cloudflare DNS configuration */
@@ -158,6 +207,19 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 
     // Use provided namespace or create a new one
     const isCreatingNamespace = !args.namespace;
+    // Pod Security Standard level for the namespace:
+    // - "restricted": default, enforces non-root, no hostPath, etc.
+    // - "baseline":   required when allowRoot is set (permits running as UID 0)
+    // - "privileged": required when hostPath volumes are present (hostPath is
+    //                 forbidden even in baseline per the K8s PSS spec)
+    const hasHostPath = args.extraVolumes?.some(
+      (v) => typeof v === "object" && v !== null && "hostPath" in v
+    );
+    const podSecurityLevel = hasHostPath
+      ? "privileged"
+      : args.securityContext?.allowRoot
+        ? "baseline"
+        : "restricted";
     const namespace =
       args.namespace ||
       new k8s.core.v1.Namespace(
@@ -168,10 +230,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             labels: {
               app: name,
               environment: pulumi.getStack(),
-              // Pod Security Standards enforcement (restricted)
-              "pod-security.kubernetes.io/enforce": "restricted",
-              "pod-security.kubernetes.io/audit": "restricted",
-              "pod-security.kubernetes.io/warn": "restricted",
+              // Pod Security Standards — relaxed to "baseline" when the image requires root
+              "pod-security.kubernetes.io/enforce": podSecurityLevel,
+              "pod-security.kubernetes.io/audit": podSecurityLevel,
+              "pod-security.kubernetes.io/warn": podSecurityLevel,
             },
           },
         },
@@ -336,7 +398,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       },
       securityContext: {
         allowPrivilegeEscalation: false,
-        runAsNonRoot: true,
+        // Only enforce runAsNonRoot when the image supports it (opt-out via allowRoot)
+        ...(args.securityContext?.allowRoot ? {} : { runAsNonRoot: true }),
         capabilities: {
           drop: ["ALL"],
         },
@@ -346,17 +409,30 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       },
     };
 
-    // Add volume mount if storage configured
-    if (args.storage && this.pvc) {
-      appContainer.volumeMounts = [
-        {
-          name: "storage",
-          mountPath: args.storage.mountPath,
-        },
-      ];
+    // Add optional command / args overrides
+    if (args.command) {
+      appContainer.command = args.command;
+    }
+    if (args.args) {
+      appContainer.args = args.args;
     }
 
-    // Build volumes list
+    // Build volume mounts: storage PVC mount + any extra mounts
+    const volumeMounts: object[] = [];
+    if (args.storage && this.pvc) {
+      volumeMounts.push({
+        name: "storage",
+        mountPath: args.storage.mountPath,
+      });
+    }
+    if (args.extraVolumeMounts) {
+      volumeMounts.push(...args.extraVolumeMounts);
+    }
+    if (volumeMounts.length > 0) {
+      appContainer.volumeMounts = volumeMounts;
+    }
+
+    // Build volumes list: storage PVC + any extra volumes
     const volumes: any[] = [];
     if (args.storage && this.pvc) {
       volumes.push({
@@ -365,6 +441,9 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           claimName: this.pvc.metadata.name,
         },
       });
+    }
+    if (args.extraVolumes) {
+      volumes.push(...args.extraVolumes);
     }
 
     // Create Deployment
@@ -397,13 +476,25 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             },
             spec: {
               imagePullSecrets: args.imagePullSecrets,
+              nodeSelector: args.nodeSelector,
               securityContext: {
-                runAsNonRoot: true,
-                runAsUser: args.securityContext?.runAsUser || 1000,
-                runAsGroup: args.securityContext?.runAsGroup || 1000,
-                fsGroup: args.securityContext?.fsGroup || 1000,
+                // Only enforce runAsNonRoot when the image supports it (opt-out via allowRoot)
+                ...(args.securityContext?.allowRoot ? {} : { runAsNonRoot: true }),
+                // When allowRoot is true, omit runAsUser/runAsGroup to let the image use its own UID
+                ...(args.securityContext?.allowRoot
+                  ? {}
+                  : {
+                      runAsUser: args.securityContext?.runAsUser || 1000,
+                      runAsGroup: args.securityContext?.runAsGroup || 1000,
+                    }),
+                fsGroup: args.securityContext?.allowRoot
+                  ? undefined
+                  : args.securityContext?.fsGroup || 1000,
               },
               containers: [appContainer],
+              initContainers: args.initContainers as
+                | k8s.types.input.core.v1.Container[]
+                | undefined,
               volumes: volumes.length > 0 ? volumes : undefined,
             },
           },
@@ -490,7 +581,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             namespace: namespace.metadata.name,
           },
           spec: {
-              errors: {
+            errors: {
               status: ["401"],
               service: {
                 // Use ExternalName service to reference shared redirect service in oauth2-proxy namespace
@@ -623,8 +714,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             },
             spec: {
               forwardAuth: {
-                address:
-                  "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
+                address: "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
                 trustForwardHeader: true,
                 authRequestHeaders: [
                   "X-Original-URL",

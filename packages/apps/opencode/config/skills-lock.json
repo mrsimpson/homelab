@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "adr-nygard": {
+      "source": "/Users/oliverjaegle/projects/privat/homelab/packages/apps/opencode/.ade/skills/adr-nygard",
+      "sourceType": "local",
+      "computedHash": "13cd33eb604e9e090057cce458469b2a1b609a6db3313a03df88d91776095b19"
+    },
+    "conventional-commits": {
+      "source": "/Users/oliverjaegle/projects/privat/homelab/packages/apps/opencode/.ade/skills/conventional-commits",
+      "sourceType": "local",
+      "computedHash": "bf79e931b5259564f56da9dd28c22069e9953603466870bbea244a3961cdafa3"
+    }
+  }
+}

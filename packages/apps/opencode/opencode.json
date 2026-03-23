@@ -1,0 +1,28 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "workflows": {
+      "type": "local",
+      "command": [
+        "npx",
+        "@codemcp/workflows-server@latest"
+      ]
+    },
+    "knowledge": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@codemcp/knowledge-server"
+      ]
+    },
+    "agentskills": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@codemcp/skills-server"
+      ]
+    }
+  }
+}

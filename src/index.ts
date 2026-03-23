@@ -1,3 +1,4 @@
+import * as nodePath from "node:path";
 import * as pulumi from "@pulumi/pulumi";
 
 // Main entry point for homelab infrastructure
@@ -5,6 +6,9 @@ import * as pulumi from "@pulumi/pulumi";
 // Export config for reference
 export const pulumiProject = pulumi.getProject();
 export const pulumiStack = pulumi.getStack();
+
+// Scoped config for the opencode app (keys set under the "opencode" namespace)
+const opencodeConfig = new pulumi.Config("opencode");
 
 // Import base infrastructure which sets up all core components
 import { setupBaseInfra } from "@mrsimpson/homelab-base-infra";
@@ -57,6 +61,7 @@ export const oauth2ProxyInstances = oauth2ProxyReleases;
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
+import { createOpencode } from "@mrsimpson/homelab-app-opencode";
 import { AuthType } from "@mrsimpson/homelab-core-components";
 
 const helloWorldApp = createHelloWorld(homelab);
@@ -113,3 +118,55 @@ export const longhornUI = {
   accessMethod: "portforward",
   command: "kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80",
 };
+
+// opencode - AI coding agent, protected by GitHub OAuth
+//
+// All settings are read from Pulumi config under the "opencode" namespace.
+// Set them with:
+//
+//   # Required — host workspace and node pinning:
+//   pulumi config set opencode:hostWorkspacePath "/home/oliver/projects"
+//   pulumi config set opencode:hostNode          "flinker"
+//
+//   # Remote provider credentials (secrets):
+//   pulumi config set opencode:anthropicApiKey <key> --secret
+//   pulumi config set opencode:openaiApiKey    <key> --secret
+//
+//   # Local llama.cpp provider (plain values, all optional):
+//   pulumi config set opencode:llamaCppBaseUrl   "http://flinker:8080/v1"
+//   pulumi config set opencode:llamaCppModelId   "qwen2.5-coder"
+//   pulumi config set opencode:llamaCppModelName "Qwen 2.5 Coder (local)"
+//
+const llamaCppBaseUrl = opencodeConfig.get("llamaCppBaseUrl");
+const llamaCppModelId = opencodeConfig.get("llamaCppModelId") ?? "local-model";
+const llamaCppModelName = opencodeConfig.get("llamaCppModelName") ?? "Local Model (llama.cpp)";
+
+const opencodeApp = createOpencode(homelab, {
+  // Required — host filesystem mount and node pinning
+  hostWorkspacePath: opencodeConfig.require("hostWorkspacePath"),
+  hostNode: opencodeConfig.require("hostNode"),
+
+  // Local LLM via llama.cpp — only configured when llamaCppBaseUrl is set
+  llamaCppBaseUrl: llamaCppBaseUrl,
+  llamaCppModels: llamaCppBaseUrl
+    ? [
+        {
+          id: llamaCppModelId,
+          name: llamaCppModelName,
+          contextLimit: Number(opencodeConfig.get("llamaCppContextLimit") ?? 262144),
+          outputLimit: Number(opencodeConfig.get("llamaCppOutputLimit") ?? 8192),
+        },
+      ]
+    : undefined,
+
+  // Config directory — all files under this path are mounted verbatim as
+  // ~/.config/opencode/ inside the container (agents, MCP servers, etc.)
+  configDir: nodePath.join(__dirname, "../packages/apps/opencode/config"),
+
+  // Remote provider credentials — add keys for whichever providers you use
+  providerEnv: [
+    { name: "ANTHROPIC_API_KEY", value: opencodeConfig.requireSecret("anthropicApiKey") },
+    // { name: "OPENAI_API_KEY", value: opencodeConfig.requireSecret("openaiApiKey") },
+  ],
+});
+export const opencodeUrl = opencodeApp.url;

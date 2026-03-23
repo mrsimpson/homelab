@@ -1,0 +1,9 @@
+choices:
+  process: codemcp-workflows
+  practices:
+    - conventional-commits
+    - adr-nygard
+  autonomy: sensible-defaults
+harnesses:
+  - universal
+  - opencode

@@ -38,3 +38,4 @@ secrets/
 .cache/
 .k3s-backup
 .crowd
+.vibe/beads-state-*.json
