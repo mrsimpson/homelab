@@ -48,6 +48,7 @@
     "@mrsimpson/homelab-app-hello-world": "*",
     "@mrsimpson/homelab-app-nodejs-demo": "*",
     "@mrsimpson/homelab-app-opencode": "*",
+    "@mrsimpson/homelab-app-opencode-router": "*",
     "@mrsimpson/homelab-app-storage-validator": "*",
     "@pulumi/cloudflare": "^5.42.0",
     "@pulumi/kubernetes": "^4.18.3",

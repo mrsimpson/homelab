@@ -13,6 +13,7 @@ const opencodeConfig = new pulumi.Config("opencode");
 // Import base infrastructure which sets up all core components
 import { setupBaseInfra } from "@mrsimpson/homelab-base-infra";
 
+import { homelabConfig } from "@mrsimpson/homelab-config";
 // Import storage infrastructure
 import {
   logBackupStatus,
@@ -62,6 +63,7 @@ export const oauth2ProxyInstances = oauth2ProxyReleases;
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
 import { createOpencode } from "@mrsimpson/homelab-app-opencode";
+import { createOpencodeRouter } from "@mrsimpson/homelab-app-opencode-router";
 import { AuthType } from "@mrsimpson/homelab-core-components";
 
 const helloWorldApp = createHelloWorld(homelab);
@@ -170,3 +172,25 @@ const opencodeApp = createOpencode(homelab, {
   ],
 });
 export const opencodeUrl = opencodeApp.url;
+
+// opencode-router — per-user isolated OpenCode instances, protected by GitHub OAuth
+//
+// Each authenticated user gets their own Pod + PVC managed dynamically by the router.
+// The router reads X-Auth-Request-Email (forwarded by oauth2-proxy) to identify users.
+//
+// Set config with:
+//   pulumi config set opencode:routerImage "ghcr.io/mrsimpson/opencode-router:0.0.1-homelab.1"
+//   # opencodeImage and anthropicApiKey already set from the opencode app config
+//
+const opencodeRouterApp = createOpencodeRouter(homelab, {
+  routerImage: opencodeConfig.require("routerImage"),
+  opencodeImage: opencodeConfig.require("opencodeImage"),
+  anthropicApiKey: opencodeConfig.requireSecret("anthropicApiKey"),
+  defaultGitRepo: opencodeConfig.get("defaultGitRepo"),
+  storageSize: opencodeConfig.get("storageSize") ?? "2Gi",
+  cloudflare: {
+    zoneId: homelabConfig.cloudflare.zoneId,
+    tunnelCname: baseInfra.cloudflare.tunnelCname,
+  },
+});
+export const opencodeRouterUrl = opencodeRouterApp.url;
