@@ -548,7 +548,7 @@ export function createOpencode(homelab: HomelabContext, cfg: OpencodeConfig): Op
   const app = homelab.createExposedWebApp(name, {
     // Our hardened wrapper image: non-root (UID 1000) on top of the official image.
     // Build with: ./images/opencode/build.sh --push --token <ghp_PAT>
-    image: "ghcr.io/mrsimpson/opencode:1.2.27-homelab.3",
+    image: "ghcr.io/mrsimpson/opencode:1.2.27-homelab.5",
     domain,
     port: OPENCODE_PORT,
     replicas: 1,

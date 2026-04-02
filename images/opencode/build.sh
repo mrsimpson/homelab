@@ -29,7 +29,7 @@ GHCR_USER="mrsimpson"
 IMAGE_NAME="opencode"
 
 PUSH=false
-REVISION=3
+REVISION=5
 TOKEN="${GITHUB_PAT:-}"
 
 # ---------------------------------------------------------------------------

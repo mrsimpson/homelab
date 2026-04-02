@@ -2,13 +2,18 @@ FROM ghcr.io/anomalyco/opencode
 
 # Install tools as root before switching to the non-root user:
 #   git, curl, bash  — essential dev tools
-#   nodejs, npm      — Node.js LTS + npm (latest from Alpine apk)
+#   nodejs, npm      — Node.js LTS + npm/npx (latest from Alpine apk)
 #   pnpm             — fast Node package manager
 #   python3          — Python interpreter (for MCP servers, scripts)
+#   uv               — fast Python package manager; also ships uvx
 #   gh               — GitHub CLI (linux/amd64 tarball from GitHub releases)
 #   bd               — beads task-management CLI (https://github.com/steveyegge/beads)
+#   ghostty          — An interactive terminal also for the web ui
 
-RUN apk add --no-cache git curl bash nodejs npm pnpm python3 && \
+RUN printf 'https://dl-cdn.alpinelinux.org/alpine/edge/main\nhttps://dl-cdn.alpinelinux.org/alpine/edge/community\nhttps://dl-cdn.alpinelinux.org/alpine/edge/testing\n' \
+      >> /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache git curl bash nodejs npm pnpm python3 uv ghostty && \
     # gh CLI — resolve latest version tag, fetch and extract just the binary
     GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest \
       | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/') && \
