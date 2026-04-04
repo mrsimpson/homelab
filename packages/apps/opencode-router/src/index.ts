@@ -213,7 +213,7 @@ export function createOpencodeRouter(
       spec: {
         refreshInterval: "1h",
         secretStoreRef: {
-          name: "cluster-secret-store",
+          name: "pulumi-esc",
           kind: "ClusterSecretStore",
         },
         target: {
@@ -223,16 +223,21 @@ export function createOpencodeRouter(
             type: "kubernetes.io/dockerconfigjson",
             engineVersion: "v2",
             data: {
-              ".dockerconfigjson": `{"auths":{"ghcr.io":{"auth":"{{ .ghcrAuth | b64enc }}"}}}`,
+              ".dockerconfigjson": `{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
             },
           },
         },
         data: [
           {
-            secretKey: "ghcrAuth",
+            secretKey: "github_username",
             remoteRef: {
-              key: "ghcr-credentials",
-              property: "auth",
+              key: "github-username",
+            },
+          },
+          {
+            secretKey: "github_token",
+            remoteRef: {
+              key: "github-token",
             },
           },
         ],
