@@ -32,6 +32,9 @@ This is additive — the existing single-user `opencode` deployment stays unchan
 - **Pulumi config keys** — `opencode:routerImage` and `opencode:opencodeImage` added to `Pulumi.dev.yaml` (gitignored; set locally). `opencode:anthropicApiKey` was already set.
 - **`OPENCODE_PORT` env var on router** — passed as `String(4096)` in Deployment env; router uses it to bind per-user pods on port 4096.
 - **Dockerfile fix** — original Dockerfile used `npm ci` + `package-lock.json` which doesn't exist (monorepo uses bun). Fixed by: (1) copying all 21 workspace `package.json` files before `bun install`, (2) adding `COPY patches/ patches/` (bun requires patch files during install), (3) using `--ignore-scripts` to skip native compilation of packages not needed for the router (e.g. `tree-sitter-powershell` from `opencode` package), (4) fixing `bun run --cwd <dir>` syntax (must come after `run`). Build context is monorepo root; final image is `node:22-alpine` with compiled dist + `node_modules` copied from bun build stage.
+- **ExternalSecret fix** — initial code used wrong ClusterSecretStore name (`cluster-secret-store` → `pulumi-esc`) and wrong key refs (`ghcr-credentials/auth` → `github-username` + `github-token`). Corrected to match the pattern used by all other working ExternalSecrets in the cluster.
+- **GHCR pull secret — PAT scope** — the `github-token` in Pulumi ESC had expired. New images (never cached on the node) require a valid `read:packages` PAT. Cached images (`opencode`) appeared to work despite an expired token. Update via: `pulumi env set mrsimpson/homelab/dev github-token <new_pat> --secret`.
+- **Deployment verified live** — `pulumi up` succeeded: 2/2 pods Running, 3 Traefik Middlewares + 2 IngressRoutes created, Cloudflare DNS CNAME active. `/api/status` returns `{"email":"test@example.com","state":"none"}` via port-forward. Public URL `https://opencode-router.no-panic.org/` returns 401 (correct — oauth2-proxy blocks unauthenticated access).
 
 ---
 
@@ -334,6 +337,7 @@ pulumi config set opencode:routerImage "ghcr.io/mrsimpson/opencode-router:0.0.1-
 - [x] Build script for router image exists (`images/opencode-router/build.sh`)
 - [x] `src/index.ts` imports and wires up `createOpencodeRouter`
 - [x] Pulumi preview completes without errors — `+ 15 to create, 108 unchanged`, zero errors/warnings
+- [x] `pulumi up` succeeded — 2/2 pods Running, all 15 resources created, public URL responds correctly
 
 ### Tasks
 <!-- beads-synced: 2026-04-02 -->
