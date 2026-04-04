@@ -333,7 +333,7 @@ pulumi config set opencode:routerImage "ghcr.io/mrsimpson/opencode-router:0.0.1-
 - [x] All Pulumi code written and type-checks cleanly
 - [x] Build script for router image exists (`images/opencode-router/build.sh`)
 - [x] `src/index.ts` imports and wires up `createOpencodeRouter`
-- [ ] Pulumi preview completes without errors
+- [x] Pulumi preview completes without errors — `+ 15 to create, 108 unchanged`, zero errors/warnings
 
 ### Tasks
 <!-- beads-synced: 2026-04-02 -->
