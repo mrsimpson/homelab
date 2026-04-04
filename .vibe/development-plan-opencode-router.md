@@ -35,6 +35,8 @@ This is additive — the existing single-user `opencode` deployment stays unchan
 - **ExternalSecret fix** — initial code used wrong ClusterSecretStore name (`cluster-secret-store` → `pulumi-esc`) and wrong key refs (`ghcr-credentials/auth` → `github-username` + `github-token`). Corrected to match the pattern used by all other working ExternalSecrets in the cluster.
 - **GHCR pull secret — PAT scope** — the `github-token` in Pulumi ESC had expired. New images (never cached on the node) require a valid `read:packages` PAT. Cached images (`opencode`) appeared to work despite an expired token. Update via: `pulumi env set mrsimpson/homelab/dev github-token <new_pat> --secret`.
 - **Deployment verified live** — `pulumi up` succeeded: 2/2 pods Running, 3 Traefik Middlewares + 2 IngressRoutes created, Cloudflare DNS CNAME active. `/api/status` returns `{"email":"test@example.com","state":"none"}` via port-forward. Public URL `https://opencode-router.no-panic.org/` returns 401 (correct — oauth2-proxy blocks unauthenticated access).
+- **Local dev auth bypass** — added `DEV_EMAIL` env var to `config.ts` + `index.ts` in the opencode fork. When `X-Auth-Request-Email` header is absent (no oauth2-proxy in local dev), the router falls back to `DEV_EMAIL`. Never set in production (no env var = no fallback = 401 for real unauthenticated requests). Restart router with `DEV_EMAIL=dev@local.test` to enable.
+- **Vite proxy for SPA dev** — added `server.proxy` to `opencode-router-app/vite.config.ts` to forward `/api/*` → `http://localhost:3002`. SPA at `localhost:5173` now talks to router at `localhost:3002`.
 
 ---
 

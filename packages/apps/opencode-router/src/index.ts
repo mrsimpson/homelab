@@ -293,6 +293,7 @@ export function createOpencodeRouter(
                   { name: "STORAGE_SIZE", value: cfg.storageSize ?? "2Gi" },
                   { name: "API_KEY_SECRET_NAME", value: "opencode-api-keys" },
                   { name: "CONFIG_MAP_NAME", value: "opencode-config-dir" },
+                  { name: "IMAGE_PULL_SECRET_NAME", value: "ghcr-pull-secret" },
                   ...(cfg.defaultGitRepo
                     ? [{ name: "DEFAULT_GIT_REPO", value: cfg.defaultGitRepo }]
                     : []),
