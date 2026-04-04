@@ -294,13 +294,18 @@ export function createOpencodeRouter(
                   { name: "API_KEY_SECRET_NAME", value: "opencode-api-keys" },
                   { name: "CONFIG_MAP_NAME", value: "opencode-config-dir" },
                   { name: "IMAGE_PULL_SECRET_NAME", value: "ghcr-pull-secret" },
+                  // ROUTER_DOMAIN: sessions are served at https://<hash>.<domain>
+                  {
+                    name: "ROUTER_DOMAIN",
+                    value: pulumi.interpolate`opencode-router.${homelabConfig.domain}`,
+                  },
                   ...(cfg.defaultGitRepo
                     ? [{ name: "DEFAULT_GIT_REPO", value: cfg.defaultGitRepo }]
                     : []),
                 ],
                 readinessProbe: {
                   httpGet: {
-                    path: "/api/status",
+                    path: "/api/sessions",
                     port: ROUTER_PORT,
                     httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
                   },
@@ -310,7 +315,7 @@ export function createOpencodeRouter(
                 },
                 livenessProbe: {
                   httpGet: {
-                    path: "/api/status",
+                    path: "/api/sessions",
                     port: ROUTER_PORT,
                     httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
                   },
@@ -502,12 +507,52 @@ export function createOpencodeRouter(
   );
 
   // -------------------------------------------------------------------------
-  // 15. Cloudflare DNS Record (optional)
+  // 15. Wildcard IngressRoute for session subdomains: *.<domain> → router
+  // Each session is served at https://<hash>.opencode-router.<domain>.
+  // The router reads the Host header subdomain to identify the session.
+  // -------------------------------------------------------------------------
+  const wildcardDomain = pulumi.interpolate`*.opencode-router.${homelabConfig.domain}`;
+  const sessionRoute = new k8s.apiextensions.CustomResource(
+    `${APP_NAME}-session-route`,
+    {
+      apiVersion: "traefik.io/v1alpha1",
+      kind: "IngressRoute",
+      metadata: {
+        name: `${APP_NAME}-session`,
+        namespace: NAMESPACE,
+      },
+      spec: {
+        entryPoints: ["web"],
+        routes: [
+          {
+            match: pulumi.interpolate`HostRegexp(\`{hash:[a-f0-9]{12}}.opencode-router.${homelabConfig.domain}\`)`,
+            kind: "Rule",
+            middlewares: [{ name: `${APP_NAME}-oauth2-chain`, namespace: NAMESPACE }],
+            services: [{ name: service.metadata.name, port: 80 }],
+          },
+        ],
+      },
+    },
+    { dependsOn: [service, chainMiddleware] }
+  );
+  void sessionRoute;
+
+  // -------------------------------------------------------------------------
+  // 16. Cloudflare DNS Records (optional): root domain + wildcard for sessions
   // -------------------------------------------------------------------------
   if (cfg.cloudflare) {
     new cloudflare.Record(`${APP_NAME}-dns`, {
       zoneId: cfg.cloudflare.zoneId,
       name: pulumi.interpolate`opencode-router.${homelabConfig.domain}`,
+      type: "CNAME",
+      content: cfg.cloudflare.tunnelCname,
+      proxied: true,
+      ttl: 1,
+    });
+    // Wildcard record for session subdomains: *.opencode-router.<domain>
+    new cloudflare.Record(`${APP_NAME}-dns-wildcard`, {
+      zoneId: cfg.cloudflare.zoneId,
+      name: wildcardDomain,
       type: "CNAME",
       content: cfg.cloudflare.tunnelCname,
       proxied: true,
