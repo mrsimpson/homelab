@@ -31,7 +31,7 @@ This is additive — the existing single-user `opencode` deployment stays unchan
 - **`OpencodeRouterConfig.cloudflare`** — optional field; when omitted, no DNS record is created. When provided, creates Cloudflare CNAME for `opencode-router.<domain>`.
 - **Pulumi config keys** — `opencode:routerImage` and `opencode:opencodeImage` added to `Pulumi.dev.yaml` (gitignored; set locally). `opencode:anthropicApiKey` was already set.
 - **`OPENCODE_PORT` env var on router** — passed as `String(4096)` in Deployment env; router uses it to bind per-user pods on port 4096.
-- **ADR-002 in opencode fork** — documents the securityContext decision for future contributors.
+- **Dockerfile fix** — original Dockerfile used `npm ci` + `package-lock.json` which doesn't exist (monorepo uses bun). Fixed by: (1) copying all 21 workspace `package.json` files before `bun install`, (2) adding `COPY patches/ patches/` (bun requires patch files during install), (3) using `--ignore-scripts` to skip native compilation of packages not needed for the router (e.g. `tree-sitter-powershell` from `opencode` package), (4) fixing `bun run --cwd <dir>` syntax (must come after `run`). Build context is monorepo root; final image is `node:22-alpine` with compiled dist + `node_modules` copied from bun build stage.
 
 ---
 
