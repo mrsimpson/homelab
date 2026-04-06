@@ -177,6 +177,13 @@ export interface ExposedWebAppArgs {
    * Each entry is a full Kubernetes container spec object.
    */
   initContainers?: object[];
+  /** ServiceAccount name to set on the pod spec (must already exist in the namespace) */
+  serviceAccountName?: string;
+  /** Container probes for the main app container */
+  probes?: {
+    readinessProbe?: object;
+    livenessProbe?: object;
+  };
 
   // Infrastructure dependencies (all optional)
   /** Cloudflare DNS configuration */
@@ -192,6 +199,7 @@ export interface ExposedWebAppArgs {
 }
 
 export class ExposedWebApp extends pulumi.ComponentResource {
+  public readonly namespace: k8s.core.v1.Namespace;
   public readonly deployment: k8s.apps.v1.Deployment;
   public readonly service: k8s.core.v1.Service;
   /** Route resource(s): single HTTPRoute (Authelia/NONE) or IngressRoute[] (OAuth2-Proxy) */
@@ -239,6 +247,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
         },
         childOpts
       );
+    this.namespace = namespace;
 
     // If creating a new namespace AND imagePullSecrets are specified,
     // automatically create ExternalSecrets for common pull secret names
@@ -417,6 +426,14 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       appContainer.args = args.args;
     }
 
+    // Add optional probes
+    if (args.probes?.readinessProbe) {
+      appContainer.readinessProbe = args.probes.readinessProbe;
+    }
+    if (args.probes?.livenessProbe) {
+      appContainer.livenessProbe = args.probes.livenessProbe;
+    }
+
     // Build volume mounts: storage PVC mount + any extra mounts
     const volumeMounts: object[] = [];
     if (args.storage && this.pvc) {
@@ -475,6 +492,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
               },
             },
             spec: {
+              serviceAccountName: args.serviceAccountName,
               imagePullSecrets: args.imagePullSecrets,
               nodeSelector: args.nodeSelector,
               securityContext: {
@@ -848,6 +866,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     }
 
     this.registerOutputs({
+      namespaceName: this.namespace.metadata.name,
       deploymentName: this.deployment.metadata.name,
       serviceName: this.service.metadata.name,
       routeName: Array.isArray(this.route)

@@ -1,6 +1,9 @@
 import { homelabConfig } from "@mrsimpson/homelab-config";
-import type { HomelabContext } from "@mrsimpson/homelab-core-components";
-import type { CloudflareConfig } from "@mrsimpson/homelab-core-components";
+import {
+  AuthType,
+  type CloudflareConfig,
+  type HomelabContext,
+} from "@mrsimpson/homelab-core-components";
 import * as cloudflare from "@pulumi/cloudflare";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
@@ -30,8 +33,9 @@ export interface OpencodeRouterConfig {
   /** Optional: PVC size per user (default: "2Gi") */
   storageSize?: string;
   /**
-   * Cloudflare DNS configuration for creating the DNS record.
-   * When omitted, no DNS record is created.
+   * Cloudflare DNS configuration for the wildcard session subdomain record.
+   * The main DNS record is handled by ExposedWebApp automatically.
+   * When omitted, no wildcard DNS record is created.
    */
   cloudflare?: CloudflareConfig;
 }
@@ -45,35 +49,31 @@ export interface OpencodeRouterApp {
 // ---------------------------------------------------------------------------
 
 /**
- * Deploy the opencode-router as a Kubernetes application.
+ * Deploy the opencode-router as a Kubernetes application using ExposedWebApp.
  *
- * Creates all required resources in the `opencode-router` namespace:
- * - Namespace (with restricted PSS labels)
- * - ServiceAccount, Role, RoleBinding (router needs to manage user pods/PVCs)
+ * ExposedWebApp handles: Deployment, Service, OAuth2-Proxy auth (middlewares +
+ * IngressRoutes), main DNS CNAME, and GHCR pull secret.
+ *
+ * This function supplements with app-specific resources:
+ * - Namespace (pre-created, passed to ExposedWebApp)
+ * - ServiceAccount, Role, RoleBinding (router manages user pods/PVCs at runtime)
  * - Secret for Anthropic API key
  * - ConfigMap with opencode.json for user pods
- * - ExternalSecret for GHCR image pull credentials
- * - Deployment (2 replicas, non-root, readiness/liveness probes)
- * - Service (ClusterIP)
- * - Traefik Middlewares and IngressRoutes (OAuth2-Proxy auth)
- * - Cloudflare DNS CNAME record (when `cfg.cloudflare` is provided)
- *
- * @param homelab - HomelabContext (currently unused but kept for API consistency)
- * @param cfg     - Router deployment configuration
+ * - Wildcard IngressRoute for session subdomains (*.opencode-router.<domain>)
+ * - Wildcard Cloudflare DNS record (when `cfg.cloudflare` is provided)
  */
 export function createOpencodeRouter(
-  _homelab: HomelabContext,
+  homelab: HomelabContext,
   cfg: OpencodeRouterConfig
 ): OpencodeRouterApp {
   // -------------------------------------------------------------------------
-  // 1. Namespace
+  // 1. Namespace (pre-created, passed to ExposedWebApp)
   // -------------------------------------------------------------------------
   const ns = new k8s.core.v1.Namespace(`${APP_NAME}-ns`, {
     metadata: {
       name: NAMESPACE,
       labels: {
         app: APP_NAME,
-        // Enforce restricted PSS — user pods have proper securityContext (UID 1000, fsGroup 1000)
         "pod-security.kubernetes.io/enforce": "restricted",
         "pod-security.kubernetes.io/enforce-version": "latest",
         "pod-security.kubernetes.io/warn": "restricted",
@@ -83,7 +83,7 @@ export function createOpencodeRouter(
   });
 
   // -------------------------------------------------------------------------
-  // 2. ServiceAccount
+  // 2. RBAC — router needs to manage user pods and PVCs at runtime
   // -------------------------------------------------------------------------
   const serviceAccount = new k8s.core.v1.ServiceAccount(
     `${APP_NAME}-sa`,
@@ -97,9 +97,6 @@ export function createOpencodeRouter(
     { dependsOn: [ns] }
   );
 
-  // -------------------------------------------------------------------------
-  // 3. Role
-  // -------------------------------------------------------------------------
   const role = new k8s.rbac.v1.Role(
     `${APP_NAME}-role`,
     {
@@ -124,9 +121,6 @@ export function createOpencodeRouter(
     { dependsOn: [ns] }
   );
 
-  // -------------------------------------------------------------------------
-  // 4. RoleBinding
-  // -------------------------------------------------------------------------
   const roleBinding = new k8s.rbac.v1.RoleBinding(
     `${APP_NAME}-rolebinding`,
     {
@@ -152,7 +146,7 @@ export function createOpencodeRouter(
   );
 
   // -------------------------------------------------------------------------
-  // 5. Secret (API keys)
+  // 3. Secret (API keys for user pods)
   // -------------------------------------------------------------------------
   const apiKeysSecret = new k8s.core.v1.Secret(
     `${APP_NAME}-api-keys`,
@@ -171,7 +165,7 @@ export function createOpencodeRouter(
   );
 
   // -------------------------------------------------------------------------
-  // 6. ConfigMap (opencode.json for user pods)
+  // 4. ConfigMap (opencode.json for user pods)
   // -------------------------------------------------------------------------
   const opencodeJson = JSON.stringify(
     {
@@ -198,320 +192,84 @@ export function createOpencodeRouter(
   );
 
   // -------------------------------------------------------------------------
-  // 7. ExternalSecret (GHCR pull secret)
-  // -------------------------------------------------------------------------
-  const pullSecret = new k8s.apiextensions.CustomResource(
-    `${APP_NAME}-ghcr-pull-secret`,
-    {
-      apiVersion: "external-secrets.io/v1beta1",
-      kind: "ExternalSecret",
-      metadata: {
-        name: "ghcr-pull-secret",
-        namespace: NAMESPACE,
-        labels: { app: APP_NAME },
-      },
-      spec: {
-        refreshInterval: "1h",
-        secretStoreRef: {
-          name: "pulumi-esc",
-          kind: "ClusterSecretStore",
-        },
-        target: {
-          name: "ghcr-pull-secret",
-          creationPolicy: "Owner",
-          template: {
-            type: "kubernetes.io/dockerconfigjson",
-            engineVersion: "v2",
-            data: {
-              ".dockerconfigjson": `{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
-            },
-          },
-        },
-        data: [
-          {
-            secretKey: "github_username",
-            remoteRef: {
-              key: "github-username",
-            },
-          },
-          {
-            secretKey: "github_token",
-            remoteRef: {
-              key: "github-token",
-            },
-          },
-        ],
-      },
-    },
-    { dependsOn: [ns] }
-  );
-
-  // -------------------------------------------------------------------------
-  // 8. Deployment
+  // 5. ExposedWebApp — handles Deployment, Service, OAuth2-Proxy auth,
+  //    main DNS, and GHCR pull secret
   // -------------------------------------------------------------------------
   const opencodeImageOutput = pulumi.output(cfg.opencodeImage);
-  const routerImageOutput = pulumi.output(cfg.routerImage);
-
-  const deployment = new k8s.apps.v1.Deployment(
-    `${APP_NAME}-deployment`,
-    {
-      metadata: {
-        name: APP_NAME,
-        namespace: NAMESPACE,
-        labels: { app: APP_NAME },
-      },
-      spec: {
-        replicas: 2,
-        selector: { matchLabels: { app: APP_NAME } },
-        template: {
-          metadata: { labels: { app: APP_NAME } },
-          spec: {
-            serviceAccountName: APP_NAME,
-            imagePullSecrets: [{ name: "ghcr-pull-secret" }],
-            securityContext: {
-              runAsUser: 1000,
-              runAsGroup: 1000,
-              runAsNonRoot: true,
-              fsGroup: 1000,
-            },
-            containers: [
-              {
-                name: APP_NAME,
-                image: routerImageOutput,
-                ports: [{ containerPort: ROUTER_PORT }],
-                securityContext: {
-                  allowPrivilegeEscalation: false,
-                  runAsNonRoot: true,
-                  capabilities: { drop: ["ALL"] },
-                  seccompProfile: { type: "RuntimeDefault" },
-                },
-                env: [
-                  { name: "OPENCODE_IMAGE", value: opencodeImageOutput },
-                  { name: "OPENCODE_NAMESPACE", value: NAMESPACE },
-                  { name: "OPENCODE_PORT", value: String(OPENCODE_PORT) },
-                  { name: "STORAGE_CLASS", value: "longhorn-uncritical" },
-                  { name: "STORAGE_SIZE", value: cfg.storageSize ?? "2Gi" },
-                  { name: "API_KEY_SECRET_NAME", value: "opencode-api-keys" },
-                  { name: "CONFIG_MAP_NAME", value: "opencode-config-dir" },
-                  { name: "IMAGE_PULL_SECRET_NAME", value: "ghcr-pull-secret" },
-                  // ROUTER_DOMAIN: sessions are served at https://<hash>.<domain>
-                  {
-                    name: "ROUTER_DOMAIN",
-                    value: pulumi.interpolate`opencode-router.${homelabConfig.domain}`,
-                  },
-                  ...(cfg.defaultGitRepo
-                    ? [{ name: "DEFAULT_GIT_REPO", value: cfg.defaultGitRepo }]
-                    : []),
-                ],
-                readinessProbe: {
-                  httpGet: {
-                    path: "/api/sessions",
-                    port: ROUTER_PORT,
-                    httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
-                  },
-                  initialDelaySeconds: 5,
-                  periodSeconds: 10,
-                  failureThreshold: 3,
-                },
-                livenessProbe: {
-                  httpGet: {
-                    path: "/api/sessions",
-                    port: ROUTER_PORT,
-                    httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
-                  },
-                  initialDelaySeconds: 15,
-                  periodSeconds: 30,
-                  failureThreshold: 3,
-                },
-                resources: {
-                  requests: { cpu: "100m", memory: "128Mi" },
-                  limits: { cpu: "500m", memory: "256Mi" },
-                },
-              },
-            ],
-          },
-        },
-      },
-    },
-    {
-      dependsOn: [ns, serviceAccount, apiKeysSecret, configMap, pullSecret, roleBinding],
-    }
-  );
-
-  // -------------------------------------------------------------------------
-  // 9. Service
-  // -------------------------------------------------------------------------
-  const service = new k8s.core.v1.Service(
-    `${APP_NAME}-svc`,
-    {
-      metadata: {
-        name: APP_NAME,
-        namespace: NAMESPACE,
-        labels: { app: APP_NAME },
-      },
-      spec: {
-        type: "ClusterIP",
-        selector: { app: APP_NAME },
-        ports: [{ port: 80, targetPort: ROUTER_PORT, protocol: "TCP" }],
-      },
-    },
-    { dependsOn: [deployment] }
-  );
-
-  // -------------------------------------------------------------------------
-  // 10-14. Traefik Middlewares and IngressRoutes (OAuth2-Proxy auth)
-  // -------------------------------------------------------------------------
   const domain = pulumi.interpolate`opencode-router.${homelabConfig.domain}`;
-  const oauth2Group = "users";
-  const oauth2Namespace = "oauth2-proxy";
-  const oauth2ProxyServiceAddress = `http://oauth2-proxy-${oauth2Group}.${oauth2Namespace}.svc.cluster.local/oauth2/auth`;
 
-  // 10. ForwardAuth middleware
-  const forwardAuthMiddleware = new k8s.apiextensions.CustomResource(
-    `${APP_NAME}-oauth2-forwardauth`,
-    {
-      apiVersion: "traefik.io/v1alpha1",
-      kind: "Middleware",
-      metadata: {
-        name: `${APP_NAME}-oauth2-forwardauth`,
-        namespace: NAMESPACE,
+  const app = homelab.createExposedWebApp(APP_NAME, {
+    namespace: ns,
+    image: pulumi.output(cfg.routerImage) as unknown as string,
+    domain,
+    port: ROUTER_PORT,
+    replicas: 2,
+    auth: AuthType.OAUTH2_PROXY,
+    oauth2Proxy: { group: "users" },
+    serviceAccountName: APP_NAME,
+    imagePullSecrets: [{ name: "ghcr-pull-secret" }],
+    securityContext: {
+      runAsUser: 1000,
+      runAsGroup: 1000,
+      fsGroup: 1000,
+    },
+    resources: {
+      requests: { cpu: "100m", memory: "128Mi" },
+      limits: { cpu: "500m", memory: "256Mi" },
+    },
+    env: [
+      { name: "OPENCODE_IMAGE", value: opencodeImageOutput as unknown as string },
+      { name: "OPENCODE_NAMESPACE", value: NAMESPACE },
+      { name: "OPENCODE_PORT", value: String(OPENCODE_PORT) },
+      { name: "STORAGE_CLASS", value: "longhorn-uncritical" },
+      { name: "STORAGE_SIZE", value: cfg.storageSize ?? "2Gi" },
+      { name: "API_KEY_SECRET_NAME", value: "opencode-api-keys" },
+      { name: "CONFIG_MAP_NAME", value: "opencode-config-dir" },
+      { name: "IMAGE_PULL_SECRET_NAME", value: "ghcr-pull-secret" },
+      {
+        name: "ROUTER_DOMAIN",
+        value: pulumi.interpolate`opencode-router.${homelabConfig.domain}` as unknown as string,
       },
-      spec: {
-        forwardAuth: {
-          address: oauth2ProxyServiceAddress,
-          trustForwardHeader: true,
-          authRequestHeaders: ["Cookie", "Authorization"],
-          authResponseHeaders: [
-            "X-Auth-Request-User",
-            "X-Auth-Request-Email",
-            "X-Auth-Request-Groups",
-            "Set-Cookie",
-          ],
+      ...(cfg.defaultGitRepo
+        ? [{ name: "DEFAULT_GIT_REPO", value: cfg.defaultGitRepo }]
+        : []),
+    ],
+    probes: {
+      readinessProbe: {
+        httpGet: {
+          path: "/api/sessions",
+          port: ROUTER_PORT,
+          httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
         },
+        initialDelaySeconds: 5,
+        periodSeconds: 10,
+        failureThreshold: 3,
       },
-    },
-    { dependsOn: [service] }
-  );
-
-  // 11. Errors middleware
-  const errorsMiddleware = new k8s.apiextensions.CustomResource(
-    `${APP_NAME}-oauth2-errors`,
-    {
-      apiVersion: "traefik.io/v1alpha1",
-      kind: "Middleware",
-      metadata: {
-        name: `${APP_NAME}-oauth2-errors`,
-        namespace: NAMESPACE,
-      },
-      spec: {
-        errors: {
-          status: ["401"],
-          service: {
-            name: "oauth2-shared-redirect",
-            namespace: "oauth2-proxy",
-            port: 80,
-          },
-          query: pulumi.interpolate`/?rd=https://${domain}{url}`,
+      livenessProbe: {
+        httpGet: {
+          path: "/api/sessions",
+          port: ROUTER_PORT,
+          httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
         },
+        initialDelaySeconds: 15,
+        periodSeconds: 30,
+        failureThreshold: 3,
       },
     },
-    { dependsOn: [service] }
-  );
+  });
 
-  // 12. Chain middleware
-  const chainMiddleware = new k8s.apiextensions.CustomResource(
-    `${APP_NAME}-oauth2-chain`,
-    {
-      apiVersion: "traefik.io/v1alpha1",
-      kind: "Middleware",
-      metadata: {
-        name: `${APP_NAME}-oauth2-chain`,
-        namespace: NAMESPACE,
-      },
-      spec: {
-        chain: {
-          middlewares: [
-            { name: `${APP_NAME}-oauth2-errors` },
-            { name: `${APP_NAME}-oauth2-forwardauth` },
-          ],
-        },
-      },
-    },
-    { dependsOn: [errorsMiddleware, forwardAuthMiddleware] }
-  );
-
-  // 13. IngressRoute for /oauth2/* (sign-in flow, unprotected)
-  const signinRoute = new k8s.apiextensions.CustomResource(
-    `${APP_NAME}-oauth2-signin-route`,
-    {
-      apiVersion: "traefik.io/v1alpha1",
-      kind: "IngressRoute",
-      metadata: {
-        name: `${APP_NAME}-oauth2-signin`,
-        namespace: NAMESPACE,
-      },
-      spec: {
-        entryPoints: ["web"],
-        routes: [
-          {
-            match: pulumi.interpolate`Host(\`${domain}\`) && PathPrefix(\`/oauth2/\`)`,
-            kind: "Rule",
-            services: [
-              {
-                name: `oauth2-proxy-${oauth2Group}`,
-                namespace: oauth2Namespace,
-                port: 80,
-              },
-            ],
-          },
-        ],
-      },
-    },
-    { dependsOn: [ns] }
-  );
-
-  // 14. IngressRoute for /* (protected by chain middleware)
-  const appRoute = new k8s.apiextensions.CustomResource(
-    `${APP_NAME}-oauth2-app-route`,
-    {
-      apiVersion: "traefik.io/v1alpha1",
-      kind: "IngressRoute",
-      metadata: {
-        name: `${APP_NAME}-oauth2-app`,
-        namespace: NAMESPACE,
-      },
-      spec: {
-        entryPoints: ["web"],
-        routes: [
-          {
-            match: pulumi.interpolate`Host(\`${domain}\`)`,
-            kind: "Rule",
-            middlewares: [
-              {
-                name: `${APP_NAME}-oauth2-chain`,
-                namespace: NAMESPACE,
-              },
-            ],
-            services: [
-              {
-                name: service.metadata.name,
-                port: 80,
-              },
-            ],
-            priority: 1,
-          },
-        ],
-      },
-    },
-    { dependsOn: [service, chainMiddleware, signinRoute] }
-  );
+  // Ensure RBAC and secrets are created before the deployment starts
+  // (ExposedWebApp depends on the namespace, but not on our app-specific resources)
+  void roleBinding;
+  void apiKeysSecret;
+  void configMap;
 
   // -------------------------------------------------------------------------
-  // 15. Wildcard IngressRoute for session subdomains: *.<domain> → router
-  // Each session is served at https://<hash>.opencode-router.<domain>.
-  // The router reads the Host header subdomain to identify the session.
+  // 6. Wildcard IngressRoute for session subdomains
+  //    Each session is served at https://<hash>.opencode-router.<domain>.
+  //    The router reads the Host header subdomain to identify the session.
+  //    Reuses the OAuth2-Proxy chain middleware created by ExposedWebApp.
   // -------------------------------------------------------------------------
-  const wildcardDomain = pulumi.interpolate`*.opencode-router.${homelabConfig.domain}`;
   const sessionRoute = new k8s.apiextensions.CustomResource(
     `${APP_NAME}-session-route`,
     {
@@ -527,41 +285,44 @@ export function createOpencodeRouter(
           {
             match: pulumi.interpolate`HostRegexp(\`{hash:[a-f0-9]{12}}.opencode-router.${homelabConfig.domain}\`)`,
             kind: "Rule",
-            middlewares: [{ name: `${APP_NAME}-oauth2-chain`, namespace: NAMESPACE }],
-            services: [{ name: service.metadata.name, port: 80 }],
+            middlewares: [
+              {
+                // Deterministic name from ExposedWebApp's OAuth2-Proxy chain middleware
+                name: `${APP_NAME}-oauth2-chain`,
+                namespace: NAMESPACE,
+              },
+            ],
+            services: [
+              {
+                name: app.service.metadata.name,
+                port: 80,
+              },
+            ],
           },
         ],
       },
     },
-    { dependsOn: [service, chainMiddleware] }
+    {
+      // Depend on ExposedWebApp's routes to ensure the chain middleware exists
+      dependsOn: Array.isArray(app.route) ? app.route : [app.route],
+    }
   );
   void sessionRoute;
 
   // -------------------------------------------------------------------------
-  // 16. Cloudflare DNS Records (optional): root domain + wildcard for sessions
+  // 7. Wildcard Cloudflare DNS for session subdomains
+  //    The main DNS record (opencode-router.<domain>) is created by ExposedWebApp.
   // -------------------------------------------------------------------------
   if (cfg.cloudflare) {
-    new cloudflare.Record(`${APP_NAME}-dns`, {
-      zoneId: cfg.cloudflare.zoneId,
-      name: pulumi.interpolate`opencode-router.${homelabConfig.domain}`,
-      type: "CNAME",
-      content: cfg.cloudflare.tunnelCname,
-      proxied: true,
-      ttl: 1,
-    });
-    // Wildcard record for session subdomains: *.opencode-router.<domain>
     new cloudflare.Record(`${APP_NAME}-dns-wildcard`, {
       zoneId: cfg.cloudflare.zoneId,
-      name: wildcardDomain,
+      name: pulumi.interpolate`*.opencode-router.${homelabConfig.domain}`,
       type: "CNAME",
       content: cfg.cloudflare.tunnelCname,
       proxied: true,
       ttl: 1,
     });
   }
-
-  // Suppress unused variable warnings — these are registered in Pulumi state
-  void appRoute;
 
   // -------------------------------------------------------------------------
   // Return
