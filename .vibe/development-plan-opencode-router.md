@@ -40,11 +40,15 @@ This is additive — the existing single-user `opencode` deployment stays unchan
 - **Local dev session isolation: `*.localhost` subdomains** — browsers resolve `*.localhost` to `127.0.0.1` natively (RFC-compliant, no `/etc/hosts` needed). Setting `ROUTER_DOMAIN=localhost:3002` in `.env.local` makes session URLs `http://<hash>.localhost:3002`. The router's `getSessionHash()` strips the port from both the `Host` header and `routerDomain` before suffix-matching, so `abc123def456.localhost:3002` correctly resolves to hash `abc123def456`. Same code path as production — no separate dev routing logic needed.
 - **`pnpm dev` without rebuild** — replaced `bash -c 'source .env.local; node dist/index.js'` with `bun --env-file=.env.local --watch src/index.ts`. Bun runs TypeScript natively (no compile step), `--watch` restarts on source changes, `--env-file` loads plain dotenv format. `tsx` was considered but not on PATH when invoked via pnpm in a bun monorepo. `.env.local` converted from `export KEY=value` shell syntax to plain `KEY=value` dotenv format.
 - **SA token expiry & TLS in local dev** — the kubeconfig token is a 24h token from `kubectl create token`; regenerate with `TOKEN_DURATION=168h ./scripts/create-local-kubeconfig.sh` for a 7-day token. Bun's TLS stack does not pick up `certificate-authority-data` from the kubeconfig the way kubectl does when the k3s CA is self-signed; `NODE_TLS_REJECT_UNAUTHORIZED=0` added to `.env.local` (dev-only, documented clearly).
+- **workingDir fix for opencode container** — `opencode serve` determines the project directory from `process.cwd()` (via `WorkspaceRouterMiddleware` fallback in `server/router.ts`). Without an explicit `workingDir`, the container starts in `/` or `/root` — neither is a git repo. The init container clones the repo into `/workspace` (subPath `projects` on the PVC → `<PVC>/projects/`). The main container mounts the full PVC at `/root` with no subPath, so the repo is at `/root/projects/`. Fix: set `workingDir: "/root/projects"` on the main container spec in `ensurePod()`.
 
 ### WIP — Known Issues (not yet fixed)
 
-- **Workspace directory not properly mounted** — the git-init container clones/checks out the repo but the resulting directory inside the pod is not correctly accessible to the opencode process. Needs investigation of the PVC subPath mount and working directory passed to `opencode serve`.
 - **Branch detection** — the branch field in the session form is manually entered. The desired UX is to auto-detect the current branch of the local checkout (not the branch the fork was cut from). Needs a mechanism to pass the branch from the client side (e.g. read from git metadata or let the user pick from a fetched list).
+
+### Resolved
+
+- **Workspace directory fix** — root cause identified and fixed. The init container clones the repo directly into `/workspace` (subPath `projects` on the PVC), landing at `<PVC>/projects/`. The main container mounts the full PVC at `/root` (no subPath), so the repo is at `/root/projects/` in the main container. `opencode serve` uses `process.cwd()` as its working directory (via `WorkspaceRouterMiddleware` in `server/router.ts`), which was `/` or `/root` — not the git repo. Fix: set `workingDir: "/root/projects"` on the main container spec in `ensurePod()`. Committed and pushed to `router-webapp` branch.
 
 ---
 
