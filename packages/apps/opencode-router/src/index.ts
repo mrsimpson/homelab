@@ -371,12 +371,27 @@ export function createOpencodeRouter(
   void sessionRoute;
 
   // -------------------------------------------------------------------------
-  // 8. Wildcard Cloudflare DNS for session subdomains
-  //    Sessions are at <hash>.ocsession.<domain> — a first-level subdomain,
+  // 8. Cloudflare DNS for session subdomains
+  //    Sessions are at <hash>.ocsession.<domain> — first-level subdomains,
   //    covered by Cloudflare's Universal SSL wildcard (*.no-panic.org).
   //    No paid Advanced Certificate Manager needed.
+  //
+  //    Two records are required:
+  //    - ocsession.<domain>   → Cloudflare must see this proxied hostname to
+  //                             activate its edge and issue the Universal SSL
+  //                             cert covering *.ocsession.<domain>.
+  //    - *.ocsession.<domain> → Routes all session hashes to the tunnel.
   // -------------------------------------------------------------------------
   if (cfg.cloudflare) {
+    void new cloudflare.Record(`${APP_NAME}-dns-ocsession`, {
+      zoneId: cfg.cloudflare.zoneId,
+      name: pulumi.interpolate`ocsession.${homelabConfig.domain}`,
+      type: "CNAME",
+      content: cfg.cloudflare.tunnelCname,
+      proxied: true,
+      ttl: 1,
+    });
+
     void new cloudflare.Record(`${APP_NAME}-dns-wildcard`, {
       zoneId: cfg.cloudflare.zoneId,
       name: pulumi.interpolate`*.ocsession.${homelabConfig.domain}`,
@@ -384,6 +399,7 @@ export function createOpencodeRouter(
       content: cfg.cloudflare.tunnelCname,
       proxied: true,
       ttl: 1,
+      allowOverwrite: true,
     });
   }
 
