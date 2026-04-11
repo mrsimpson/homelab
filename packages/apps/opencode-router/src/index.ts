@@ -365,18 +365,35 @@ export function createOpencodeRouter(
   void sessionRoute;
 
   // -------------------------------------------------------------------------
-  // 8. Wildcard Cloudflare DNS for session subdomains
+  // 8. Wildcard Cloudflare DNS + Advanced Certificate for session subdomains
   //    The main DNS record (opencode-router.<domain>) is created by ExposedWebApp
   //    via HomelabContext's injected cloudflare config.
+  //
+  //    Cloudflare Universal SSL only covers *.no-panic.org (one level deep).
+  //    Session subdomains (*.opencode-router.no-panic.org) are two levels deep
+  //    and require an Advanced Certificate Pack with DNS-01 validation.
   // -------------------------------------------------------------------------
   if (cfg.cloudflare) {
-    new cloudflare.Record(`${APP_NAME}-dns-wildcard`, {
+    void new cloudflare.Record(`${APP_NAME}-dns-wildcard`, {
       zoneId: cfg.cloudflare.zoneId,
       name: pulumi.interpolate`*.opencode-router.${homelabConfig.domain}`,
       type: "CNAME",
       content: cfg.cloudflare.tunnelCname,
       proxied: true,
       ttl: 1,
+    });
+
+    void new cloudflare.CertificatePack(`${APP_NAME}-cert`, {
+      zoneId: cfg.cloudflare.zoneId,
+      type: "advanced",
+      hosts: [
+        pulumi.interpolate`opencode-router.${homelabConfig.domain}`,
+        pulumi.interpolate`*.opencode-router.${homelabConfig.domain}`,
+      ],
+      validationMethod: "txt",
+      validityDays: 90,
+      certificateAuthority: "lets_encrypt",
+      waitForActiveStatus: false,
     });
   }
 
