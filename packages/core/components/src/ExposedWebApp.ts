@@ -44,6 +44,30 @@ import * as pulumi from "@pulumi/pulumi";
  *   (the only level that permits hostPath volumes per the Kubernetes PSS spec).
  *   The pod itself still runs as non-root with all capabilities dropped.
  *
+ * ### Service account
+ * - `serviceAccountName` — set the pod's ServiceAccount (must already exist in the namespace).
+ *   Useful when the app needs RBAC permissions (e.g. managing pods via the K8s API).
+ *
+ * ### Health probes
+ * - `probes.readinessProbe` / `probes.livenessProbe` — standard Kubernetes probe objects
+ *   applied to the main app container. Omit to use no probes (Kubernetes default).
+ *
+ * ## OAuth2-Proxy middleware naming
+ *
+ * When `auth` is `AuthType.OAUTH2_PROXY`, three Traefik middlewares are created in the
+ * app's namespace with deterministic names:
+ * - `<name>-oauth2-forwardauth` — ForwardAuth check against oauth2-proxy
+ * - `<name>-oauth2-errors` — 401 → redirect to sign-in
+ * - `<name>-oauth2-chain` — chains errors + forwardauth
+ *
+ * Apps that need **additional IngressRoutes** (e.g. wildcard subdomain routes) can
+ * reference the chain middleware by name to share the same auth flow:
+ * ```yaml
+ * middlewares:
+ *   - name: <name>-oauth2-chain
+ *     namespace: <app-namespace>
+ * ```
+ *
  * ## Example
  * ```typescript
  * homelab.createExposedWebApp("blog", {
