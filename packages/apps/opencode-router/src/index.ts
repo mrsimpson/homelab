@@ -280,8 +280,12 @@ export function createOpencodeRouter(
       { name: "CONFIG_MAP_NAME", value: "opencode-config-dir" },
       { name: "IMAGE_PULL_SECRET_NAME", value: "ghcr-pull-secret" },
       {
+        // Session subdomains use a separate first-level subdomain (ocsession.<domain>)
+        // so that *.ocsession.<domain> is covered by Cloudflare's Universal SSL
+        // wildcard cert (*.no-panic.org). Using *.opencode-router.<domain> would
+        // be a second-level wildcard, requiring paid Advanced Certificate Manager.
         name: "ROUTER_DOMAIN",
-        value: pulumi.interpolate`opencode-router.${homelabConfig.domain}`,
+        value: pulumi.interpolate`ocsession.${homelabConfig.domain}`,
       },
       ...(cfg.defaultGitRepo
         ? [{ name: "DEFAULT_GIT_REPO", value: cfg.defaultGitRepo }]
@@ -321,8 +325,10 @@ export function createOpencodeRouter(
 
   // -------------------------------------------------------------------------
   // 7. Wildcard IngressRoute for session subdomains
-  //    Each session is served at https://<hash>.opencode-router.<domain>.
-  //    The router reads the Host header subdomain to identify the session.
+  //    Each session is served at https://<hash>.ocsession.<domain>.
+  //    Using ocsession.<domain> (first-level subdomain) means *.ocsession.<domain>
+  //    is covered by Cloudflare's Universal SSL wildcard (*.no-panic.org).
+  //    The router reads the Host header to extract the 12-char hex hash.
   //    Reuses the OAuth2-Proxy chain middleware created by ExposedWebApp.
   // -------------------------------------------------------------------------
   const sessionRoute = new k8s.apiextensions.CustomResource(
@@ -338,7 +344,7 @@ export function createOpencodeRouter(
         entryPoints: ["web"],
         routes: [
           {
-            match: pulumi.interpolate`HostRegexp(\`{hash:[a-f0-9]{12}}.opencode-router.${homelabConfig.domain}\`)`,
+            match: pulumi.interpolate`HostRegexp(\`{hash:[a-f0-9]{12}}.ocsession.${homelabConfig.domain}\`)`,
             kind: "Rule",
             middlewares: [
               {
@@ -365,35 +371,19 @@ export function createOpencodeRouter(
   void sessionRoute;
 
   // -------------------------------------------------------------------------
-  // 8. Wildcard Cloudflare DNS + Advanced Certificate for session subdomains
-  //    The main DNS record (opencode-router.<domain>) is created by ExposedWebApp
-  //    via HomelabContext's injected cloudflare config.
-  //
-  //    Cloudflare Universal SSL only covers *.no-panic.org (one level deep).
-  //    Session subdomains (*.opencode-router.no-panic.org) are two levels deep
-  //    and require an Advanced Certificate Pack with DNS-01 validation.
+  // 8. Wildcard Cloudflare DNS for session subdomains
+  //    Sessions are at <hash>.ocsession.<domain> — a first-level subdomain,
+  //    covered by Cloudflare's Universal SSL wildcard (*.no-panic.org).
+  //    No paid Advanced Certificate Manager needed.
   // -------------------------------------------------------------------------
   if (cfg.cloudflare) {
     void new cloudflare.Record(`${APP_NAME}-dns-wildcard`, {
       zoneId: cfg.cloudflare.zoneId,
-      name: pulumi.interpolate`*.opencode-router.${homelabConfig.domain}`,
+      name: pulumi.interpolate`*.ocsession.${homelabConfig.domain}`,
       type: "CNAME",
       content: cfg.cloudflare.tunnelCname,
       proxied: true,
       ttl: 1,
-    });
-
-    void new cloudflare.CertificatePack(`${APP_NAME}-cert`, {
-      zoneId: cfg.cloudflare.zoneId,
-      type: "advanced",
-      hosts: [
-        pulumi.interpolate`opencode-router.${homelabConfig.domain}`,
-        pulumi.interpolate`*.opencode-router.${homelabConfig.domain}`,
-      ],
-      validationMethod: "txt",
-      validityDays: 90,
-      certificateAuthority: "lets_encrypt",
-      waitForActiveStatus: false,
     });
   }
 
