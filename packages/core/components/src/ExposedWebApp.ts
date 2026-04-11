@@ -884,6 +884,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           // Proxy through Cloudflare to enable both IPv4 and IPv6
           proxied: true,
           comment: `Managed by Pulumi - ${name}`,
+          // Allow Pulumi to take ownership of a pre-existing record with the
+          // same name/type (e.g. when migrating from manually-created records
+          // or when the Pulumi URN changes due to refactoring).
+          allowOverwrite: true,
         },
         childOpts
       );
