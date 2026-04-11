@@ -144,7 +144,7 @@ export interface OAuth2ProxyConfig {
 
 export interface ExposedWebAppArgs {
   /** Container image to deploy */
-  image: string;
+  image: string | pulumi.Output<string>;
   /** Fully qualified domain name */
   domain: string | pulumi.Output<string>;
   /** Container port */

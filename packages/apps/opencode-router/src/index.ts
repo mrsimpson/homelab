@@ -33,9 +33,10 @@ export interface OpencodeRouterConfig {
   /** Optional: PVC size per user (default: "2Gi") */
   storageSize?: string;
   /**
-   * Cloudflare DNS configuration for the wildcard session subdomain record.
-   * The main DNS record is handled by ExposedWebApp automatically.
-   * When omitted, no wildcard DNS record is created.
+   * Cloudflare DNS configuration.
+   * Used for both the main DNS record (opencode-router.<domain>) via ExposedWebApp,
+   * and the wildcard session subdomain record (*.opencode-router.<domain>).
+   * When omitted, no DNS records are created.
    */
   cloudflare?: CloudflareConfig;
 }
@@ -52,11 +53,13 @@ export interface OpencodeRouterApp {
  * Deploy the opencode-router as a Kubernetes application using ExposedWebApp.
  *
  * ExposedWebApp handles: Deployment, Service, OAuth2-Proxy auth (middlewares +
- * IngressRoutes), main DNS CNAME, and GHCR pull secret.
+ * IngressRoutes), main DNS CNAME, and GHCR pull secret (via ExternalSecret).
  *
  * This function supplements with app-specific resources:
- * - Namespace (pre-created, passed to ExposedWebApp)
+ * - Namespace (pre-created with restricted PSS, passed to ExposedWebApp)
  * - ServiceAccount, Role, RoleBinding (router manages user pods/PVCs at runtime)
+ * - ExternalSecret for GHCR image pull credentials (explicit: namespace is pre-created,
+ *   so ExposedWebApp's auto-create path is skipped)
  * - Secret for Anthropic API key
  * - ConfigMap with opencode.json for user pods
  * - Wildcard IngressRoute for session subdomains (*.opencode-router.<domain>)
@@ -148,7 +151,10 @@ export function createOpencodeRouter(
   // -------------------------------------------------------------------------
   // 3. Secret (API keys for user pods)
   // -------------------------------------------------------------------------
-  const apiKeysSecret = new k8s.core.v1.Secret(
+  // apiKeysSecret and configMap are consumed by user pods at runtime (not by the
+  // router deployment). The router passes their names via API_KEY_SECRET_NAME and
+  // CONFIG_MAP_NAME env vars, so they just need to exist in the namespace.
+  void new k8s.core.v1.Secret(
     `${APP_NAME}-api-keys`,
     {
       metadata: {
@@ -176,7 +182,7 @@ export function createOpencodeRouter(
     2
   );
 
-  const configMap = new k8s.core.v1.ConfigMap(
+  void new k8s.core.v1.ConfigMap(
     `${APP_NAME}-config`,
     {
       metadata: {
@@ -192,15 +198,62 @@ export function createOpencodeRouter(
   );
 
   // -------------------------------------------------------------------------
-  // 5. ExposedWebApp — handles Deployment, Service, OAuth2-Proxy auth,
-  //    main DNS, and GHCR pull secret
+  // 5. ExternalSecret (GHCR pull secret)
+  //    Explicitly created here because ExposedWebApp's auto-create only fires
+  //    when it creates the namespace itself (isCreatingNamespace). Since we
+  //    pre-create the namespace above and pass it in, we must create this manually.
   // -------------------------------------------------------------------------
-  const opencodeImageOutput = pulumi.output(cfg.opencodeImage);
+  const pullSecret = new k8s.apiextensions.CustomResource(
+    `${APP_NAME}-ghcr-pull-secret`,
+    {
+      apiVersion: "external-secrets.io/v1beta1",
+      kind: "ExternalSecret",
+      metadata: {
+        name: "ghcr-pull-secret",
+        namespace: NAMESPACE,
+        labels: { app: APP_NAME },
+      },
+      spec: {
+        refreshInterval: "1h",
+        secretStoreRef: {
+          name: "pulumi-esc",
+          kind: "ClusterSecretStore",
+        },
+        target: {
+          name: "ghcr-pull-secret",
+          creationPolicy: "Owner",
+          template: {
+            type: "kubernetes.io/dockerconfigjson",
+            engineVersion: "v2",
+            data: {
+              ".dockerconfigjson": `{"auths":{"ghcr.io":{"username":"{{ .github_username }}","password":"{{ .github_token }}","auth":"{{ printf "%s:%s" .github_username .github_token | b64enc }}"}}}`,
+            },
+          },
+        },
+        data: [
+          {
+            secretKey: "github_username",
+            remoteRef: { key: "github-username" },
+          },
+          {
+            secretKey: "github_token",
+            remoteRef: { key: "github-token" },
+          },
+        ],
+      },
+    },
+    { dependsOn: [ns] }
+  );
+
+  // -------------------------------------------------------------------------
+  // 6. ExposedWebApp — handles Deployment, Service, OAuth2-Proxy auth,
+  //    main DNS CNAME, and GHCR pull secret dependency
+  // -------------------------------------------------------------------------
   const domain = pulumi.interpolate`opencode-router.${homelabConfig.domain}`;
 
   const app = homelab.createExposedWebApp(APP_NAME, {
     namespace: ns,
-    image: pulumi.output(cfg.routerImage) as unknown as string,
+    image: pulumi.output(cfg.routerImage),
     domain,
     port: ROUTER_PORT,
     replicas: 2,
@@ -218,7 +271,7 @@ export function createOpencodeRouter(
       limits: { cpu: "500m", memory: "256Mi" },
     },
     env: [
-      { name: "OPENCODE_IMAGE", value: opencodeImageOutput as unknown as string },
+      { name: "OPENCODE_IMAGE", value: pulumi.output(cfg.opencodeImage) },
       { name: "OPENCODE_NAMESPACE", value: NAMESPACE },
       { name: "OPENCODE_PORT", value: String(OPENCODE_PORT) },
       { name: "STORAGE_CLASS", value: "longhorn-uncritical" },
@@ -228,7 +281,7 @@ export function createOpencodeRouter(
       { name: "IMAGE_PULL_SECRET_NAME", value: "ghcr-pull-secret" },
       {
         name: "ROUTER_DOMAIN",
-        value: pulumi.interpolate`opencode-router.${homelabConfig.domain}` as unknown as string,
+        value: pulumi.interpolate`opencode-router.${homelabConfig.domain}`,
       },
       ...(cfg.defaultGitRepo
         ? [{ name: "DEFAULT_GIT_REPO", value: cfg.defaultGitRepo }]
@@ -256,16 +309,18 @@ export function createOpencodeRouter(
         failureThreshold: 3,
       },
     },
+    // Note: cloudflare config is NOT passed here — HomelabContext injects it
+    // from the shared infrastructure config. The main DNS record
+    // (opencode-router.<domain>) is created automatically by ExposedWebApp
+    // using the cloudflare config from HomelabContext.
+  }, {
+    // Deployment must wait for RBAC (serviceAccountName must exist) and the
+    // GHCR pull secret (imagePullSecrets references it).
+    dependsOn: [roleBinding, pullSecret],
   });
 
-  // Ensure RBAC and secrets are created before the deployment starts
-  // (ExposedWebApp depends on the namespace, but not on our app-specific resources)
-  void roleBinding;
-  void apiKeysSecret;
-  void configMap;
-
   // -------------------------------------------------------------------------
-  // 6. Wildcard IngressRoute for session subdomains
+  // 7. Wildcard IngressRoute for session subdomains
   //    Each session is served at https://<hash>.opencode-router.<domain>.
   //    The router reads the Host header subdomain to identify the session.
   //    Reuses the OAuth2-Proxy chain middleware created by ExposedWebApp.
@@ -310,8 +365,9 @@ export function createOpencodeRouter(
   void sessionRoute;
 
   // -------------------------------------------------------------------------
-  // 7. Wildcard Cloudflare DNS for session subdomains
-  //    The main DNS record (opencode-router.<domain>) is created by ExposedWebApp.
+  // 8. Wildcard Cloudflare DNS for session subdomains
+  //    The main DNS record (opencode-router.<domain>) is created by ExposedWebApp
+  //    via HomelabContext's injected cloudflare config.
   // -------------------------------------------------------------------------
   if (cfg.cloudflare) {
     new cloudflare.Record(`${APP_NAME}-dns-wildcard`, {
