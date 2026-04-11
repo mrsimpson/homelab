@@ -4,7 +4,6 @@ import {
   type CloudflareConfig,
   type HomelabContext,
 } from "@mrsimpson/homelab-core-components";
-import * as cloudflare from "@pulumi/cloudflare";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 
@@ -16,29 +15,42 @@ const NAMESPACE = "opencode-router";
 const APP_NAME = "opencode-router";
 const ROUTER_PORT = 3000;
 const OPENCODE_PORT = 4096;
+/** Suffix appended to hash for session hostnames: <hash>-oc.<domain> */
+const ROUTE_SUFFIX = "-oc";
+/** In-cluster URL the Cloudflare operator routes session traffic to */
+const ROUTER_SERVICE_URL = `http://${APP_NAME}.${NAMESPACE}.svc.cluster.local:80`;
+/** Operator sidecar image */
+const CF_OPERATOR_CONTAINER_NAME = "cloudflare-operator";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
 // ---------------------------------------------------------------------------
 
 export interface OpencodeRouterConfig {
-  /** Image for the opencode-router (e.g. ghcr.io/mrsimpson/opencode-router:0.0.1-homelab.1) */
+  /** Image for the opencode-router (e.g. ghcr.io/mrsimpson/opencode-router:0.0.1-homelab.3) */
   routerImage: string | pulumi.Output<string>;
-  /** Image for per-user opencode pods (e.g. ghcr.io/mrsimpson/opencode:1.2.27-homelab.5) */
+  /** Image for the Cloudflare operator sidecar */
+  cfOperatorImage: string | pulumi.Output<string>;
+  /** Image for per-user opencode pods (e.g. ghcr.io/mrsimpson/opencode:1.2.27-homelab.6) */
   opencodeImage: string | pulumi.Output<string>;
   /** Anthropic API key (secret) */
   anthropicApiKey: pulumi.Output<string>;
+  /**
+   * Cloudflare configuration for DNS + tunnel route management.
+   * Required for the operator sidecar to provision per-session hostnames.
+   * The main DNS record (opencode-router.<domain>) is created automatically
+   * by ExposedWebApp via HomelabContext's injected cloudflare config.
+   */
+  cloudflare?: CloudflareConfig & {
+    /** Cloudflare API token (DNS:Edit + Zone:Read + Tunnel:Edit) */
+    apiToken: pulumi.Output<string>;
+    /** Cloudflare Tunnel ID */
+    tunnelId: pulumi.Output<string>;
+  };
   /** Optional: git repo to auto-clone for new users */
   defaultGitRepo?: string;
   /** Optional: PVC size per user (default: "2Gi") */
   storageSize?: string;
-  /**
-   * Cloudflare DNS configuration.
-   * Used for both the main DNS record (opencode-router.<domain>) via ExposedWebApp,
-   * and the wildcard session subdomain record (*.opencode-router.<domain>).
-   * When omitted, no DNS records are created.
-   */
-  cloudflare?: CloudflareConfig;
 }
 
 export interface OpencodeRouterApp {
@@ -62,8 +74,13 @@ export interface OpencodeRouterApp {
  *   so ExposedWebApp's auto-create path is skipped)
  * - Secret for Anthropic API key
  * - ConfigMap with opencode.json for user pods
- * - Wildcard IngressRoute for session subdomains (*.opencode-router.<domain>)
- * - Wildcard Cloudflare DNS record (when `cfg.cloudflare` is provided)
+ * - Secret for Cloudflare credentials (used by the operator sidecar)
+ * - Cloudflare operator sidecar (via ExposedWebApp extraContainers): watches session
+ *   pods and creates/deletes <hash>-oc.<domain> DNS records + tunnel routes on demand.
+ *   Session hostnames stay at first-subdomain level → covered by *.no-panic.org Universal SSL.
+ *
+ * Session URL pattern: https://<hash>-oc.<domain>
+ *   e.g. https://abc123def456-oc.no-panic.org
  */
 export function createOpencodeRouter(
   homelab: HomelabContext,
@@ -86,7 +103,8 @@ export function createOpencodeRouter(
   });
 
   // -------------------------------------------------------------------------
-  // 2. RBAC — router needs to manage user pods and PVCs at runtime
+  // 2. RBAC — router needs to manage user pods and PVCs at runtime;
+  //    operator sidecar needs to watch pods. Both share this ServiceAccount.
   // -------------------------------------------------------------------------
   const serviceAccount = new k8s.core.v1.ServiceAccount(
     `${APP_NAME}-sa`,
@@ -112,7 +130,7 @@ export function createOpencodeRouter(
         {
           apiGroups: [""],
           resources: ["pods"],
-          verbs: ["get", "list", "create", "delete", "patch"],
+          verbs: ["get", "list", "watch", "create", "delete", "patch"],
         },
         {
           apiGroups: [""],
@@ -150,10 +168,8 @@ export function createOpencodeRouter(
 
   // -------------------------------------------------------------------------
   // 3. Secret (API keys for user pods)
+  //    Consumed by user pods at runtime via API_KEY_SECRET_NAME env var.
   // -------------------------------------------------------------------------
-  // apiKeysSecret and configMap are consumed by user pods at runtime (not by the
-  // router deployment). The router passes their names via API_KEY_SECRET_NAME and
-  // CONFIG_MAP_NAME env vars, so they just need to exist in the namespace.
   void new k8s.core.v1.Secret(
     `${APP_NAME}-api-keys`,
     {
@@ -173,15 +189,6 @@ export function createOpencodeRouter(
   // -------------------------------------------------------------------------
   // 4. ConfigMap (opencode.json for user pods)
   // -------------------------------------------------------------------------
-  const opencodeJson = JSON.stringify(
-    {
-      $schema: "https://opencode.ai/config.json",
-      model: "anthropic/claude-sonnet-4-5",
-    },
-    null,
-    2
-  );
-
   void new k8s.core.v1.ConfigMap(
     `${APP_NAME}-config`,
     {
@@ -191,7 +198,14 @@ export function createOpencodeRouter(
         labels: { app: APP_NAME },
       },
       data: {
-        "opencode.json": opencodeJson,
+        "opencode.json": JSON.stringify(
+          {
+            $schema: "https://opencode.ai/config.json",
+            model: "anthropic/claude-sonnet-4-5",
+          },
+          null,
+          2
+        ),
       },
     },
     { dependsOn: [ns] }
@@ -246,162 +260,168 @@ export function createOpencodeRouter(
   );
 
   // -------------------------------------------------------------------------
-  // 6. ExposedWebApp — handles Deployment, Service, OAuth2-Proxy auth,
-  //    main DNS CNAME, and GHCR pull secret dependency
+  // 6. Cloudflare credentials Secret (for operator sidecar)
+  //    Only created when cloudflare config is provided.
+  // -------------------------------------------------------------------------
+  const cfSecret = cfg.cloudflare
+    ? new k8s.core.v1.Secret(
+        `${APP_NAME}-cf-credentials`,
+        {
+          metadata: {
+            name: `${APP_NAME}-cf-credentials`,
+            namespace: NAMESPACE,
+            labels: { app: APP_NAME },
+          },
+          type: "Opaque",
+          stringData: {
+            CF_API_TOKEN: cfg.cloudflare.apiToken,
+          },
+        },
+        { dependsOn: [ns] }
+      )
+    : null;
+
+  // -------------------------------------------------------------------------
+  // 7. Operator sidecar container spec (conditionally added to ExposedWebApp)
+  //    Watches session pods and manages <hash>-oc.<domain> DNS + tunnel routes.
+  //    Shares the pod's ServiceAccount (pod watch RBAC) and imagePullSecrets.
+  // -------------------------------------------------------------------------
+  const operatorSidecar = cfg.cloudflare
+    ? [
+        {
+          name: CF_OPERATOR_CONTAINER_NAME,
+          image: pulumi.output(cfg.cfOperatorImage),
+          securityContext: {
+            allowPrivilegeEscalation: false,
+            runAsNonRoot: true,
+            capabilities: { drop: ["ALL"] },
+            seccompProfile: { type: "RuntimeDefault" },
+          },
+          env: [
+            { name: "WATCH_NAMESPACE", value: NAMESPACE },
+            {
+              name: "POD_LABEL_SELECTOR",
+              value: "app.kubernetes.io/managed-by=opencode-router",
+            },
+            { name: "CF_ZONE_ID", value: pulumi.output(cfg.cloudflare.zoneId) },
+            { name: "CF_TUNNEL_ID", value: pulumi.output(cfg.cloudflare.tunnelId) },
+            { name: "DOMAIN", value: homelabConfig.domain },
+            { name: "ROUTE_SUFFIX", value: ROUTE_SUFFIX },
+            { name: "ROUTER_SERVICE_URL", value: ROUTER_SERVICE_URL },
+            {
+              name: "CF_API_TOKEN",
+              valueFrom: {
+                secretKeyRef: {
+                  name: `${APP_NAME}-cf-credentials`,
+                  key: "CF_API_TOKEN",
+                },
+              },
+            },
+          ],
+          readinessProbe: {
+            httpGet: { path: "/healthz", port: 8080 },
+            initialDelaySeconds: 5,
+            periodSeconds: 10,
+          },
+          livenessProbe: {
+            httpGet: { path: "/healthz", port: 8080 },
+            initialDelaySeconds: 15,
+            periodSeconds: 30,
+          },
+          resources: {
+            requests: { cpu: "50m", memory: "64Mi" },
+            limits: { cpu: "200m", memory: "128Mi" },
+          },
+        },
+      ]
+    : [];
+
+  // -------------------------------------------------------------------------
+  // 8. ExposedWebApp — Deployment, Service, OAuth2-Proxy auth, main DNS CNAME
+  //
+  //    Session URLs: <hash>-oc.<domain> (first-level subdomain of homelabConfig.domain)
+  //    ROUTER_DOMAIN=<homelabConfig.domain>, ROUTE_SUFFIX=-oc
+  //    → covered by Cloudflare Universal SSL *.no-panic.org, no ACM needed.
+  //
+  //    Note: cloudflare config is NOT passed here — HomelabContext injects it
+  //    from the shared infrastructure config, creating the main DNS record
+  //    (opencode-router.<domain>) automatically.
   // -------------------------------------------------------------------------
   const domain = pulumi.interpolate`opencode-router.${homelabConfig.domain}`;
 
-  const app = homelab.createExposedWebApp(APP_NAME, {
-    namespace: ns,
-    image: pulumi.output(cfg.routerImage),
-    domain,
-    port: ROUTER_PORT,
-    replicas: 2,
-    auth: AuthType.OAUTH2_PROXY,
-    oauth2Proxy: { group: "users" },
-    serviceAccountName: APP_NAME,
-    imagePullSecrets: [{ name: "ghcr-pull-secret" }],
-    securityContext: {
-      runAsUser: 1000,
-      runAsGroup: 1000,
-      fsGroup: 1000,
-    },
-    resources: {
-      requests: { cpu: "100m", memory: "128Mi" },
-      limits: { cpu: "500m", memory: "256Mi" },
-    },
-    env: [
-      { name: "OPENCODE_IMAGE", value: pulumi.output(cfg.opencodeImage) },
-      { name: "OPENCODE_NAMESPACE", value: NAMESPACE },
-      { name: "OPENCODE_PORT", value: String(OPENCODE_PORT) },
-      { name: "STORAGE_CLASS", value: "longhorn-uncritical" },
-      { name: "STORAGE_SIZE", value: cfg.storageSize ?? "2Gi" },
-      { name: "API_KEY_SECRET_NAME", value: "opencode-api-keys" },
-      { name: "CONFIG_MAP_NAME", value: "opencode-config-dir" },
-      { name: "IMAGE_PULL_SECRET_NAME", value: "ghcr-pull-secret" },
-      {
-        // Session subdomains use a separate first-level subdomain (ocsession.<domain>)
-        // so that *.ocsession.<domain> is covered by Cloudflare's Universal SSL
-        // wildcard cert (*.no-panic.org). Using *.opencode-router.<domain> would
-        // be a second-level wildcard, requiring paid Advanced Certificate Manager.
-        name: "ROUTER_DOMAIN",
-        value: pulumi.interpolate`ocsession.${homelabConfig.domain}`,
-      },
-      ...(cfg.defaultGitRepo
-        ? [{ name: "DEFAULT_GIT_REPO", value: cfg.defaultGitRepo }]
-        : []),
-    ],
-    probes: {
-      readinessProbe: {
-        httpGet: {
-          path: "/api/sessions",
-          port: ROUTER_PORT,
-          httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
-        },
-        initialDelaySeconds: 5,
-        periodSeconds: 10,
-        failureThreshold: 3,
-      },
-      livenessProbe: {
-        httpGet: {
-          path: "/api/sessions",
-          port: ROUTER_PORT,
-          httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
-        },
-        initialDelaySeconds: 15,
-        periodSeconds: 30,
-        failureThreshold: 3,
-      },
-    },
-    // Note: cloudflare config is NOT passed here — HomelabContext injects it
-    // from the shared infrastructure config. The main DNS record
-    // (opencode-router.<domain>) is created automatically by ExposedWebApp
-    // using the cloudflare config from HomelabContext.
-  }, {
-    // Deployment must wait for RBAC (serviceAccountName must exist) and the
-    // GHCR pull secret (imagePullSecrets references it).
-    dependsOn: [roleBinding, pullSecret],
-  });
-
-  // -------------------------------------------------------------------------
-  // 7. Wildcard IngressRoute for session subdomains
-  //    Each session is served at https://<hash>.ocsession.<domain>.
-  //    Using ocsession.<domain> (first-level subdomain) means *.ocsession.<domain>
-  //    is covered by Cloudflare's Universal SSL wildcard (*.no-panic.org).
-  //    The router reads the Host header to extract the 12-char hex hash.
-  //    Reuses the OAuth2-Proxy chain middleware created by ExposedWebApp.
-  // -------------------------------------------------------------------------
-  const sessionRoute = new k8s.apiextensions.CustomResource(
-    `${APP_NAME}-session-route`,
+  const app = homelab.createExposedWebApp(
+    APP_NAME,
     {
-      apiVersion: "traefik.io/v1alpha1",
-      kind: "IngressRoute",
-      metadata: {
-        name: `${APP_NAME}-session`,
-        namespace: NAMESPACE,
+      namespace: ns,
+      image: pulumi.output(cfg.routerImage),
+      domain,
+      port: ROUTER_PORT,
+      replicas: 2,
+      auth: AuthType.OAUTH2_PROXY,
+      oauth2Proxy: { group: "users" },
+      serviceAccountName: APP_NAME,
+      imagePullSecrets: [{ name: "ghcr-pull-secret" }],
+      securityContext: {
+        runAsUser: 1000,
+        runAsGroup: 1000,
+        fsGroup: 1000,
       },
-      spec: {
-        entryPoints: ["web"],
-        routes: [
-          {
-            match: pulumi.interpolate`HostRegexp(\`{hash:[a-f0-9]{12}}.ocsession.${homelabConfig.domain}\`)`,
-            kind: "Rule",
-            middlewares: [
-              {
-                // Deterministic name from ExposedWebApp's OAuth2-Proxy chain middleware
-                name: `${APP_NAME}-oauth2-chain`,
-                namespace: NAMESPACE,
-              },
-            ],
-            services: [
-              {
-                name: app.service.metadata.name,
-                port: 80,
-              },
-            ],
+      resources: {
+        requests: { cpu: "100m", memory: "128Mi" },
+        limits: { cpu: "500m", memory: "256Mi" },
+      },
+      env: [
+        { name: "OPENCODE_IMAGE", value: pulumi.output(cfg.opencodeImage) },
+        { name: "OPENCODE_NAMESPACE", value: NAMESPACE },
+        { name: "OPENCODE_PORT", value: String(OPENCODE_PORT) },
+        { name: "STORAGE_CLASS", value: "longhorn-uncritical" },
+        { name: "STORAGE_SIZE", value: cfg.storageSize ?? "2Gi" },
+        { name: "API_KEY_SECRET_NAME", value: "opencode-api-keys" },
+        { name: "CONFIG_MAP_NAME", value: "opencode-config-dir" },
+        { name: "IMAGE_PULL_SECRET_NAME", value: "ghcr-pull-secret" },
+        // ROUTER_DOMAIN is the base domain; sessions are at <hash>-oc.<domain>
+        { name: "ROUTER_DOMAIN", value: homelabConfig.domain },
+        { name: "ROUTE_SUFFIX", value: ROUTE_SUFFIX },
+        ...(cfg.defaultGitRepo
+          ? [{ name: "DEFAULT_GIT_REPO", value: cfg.defaultGitRepo }]
+          : []),
+      ],
+      probes: {
+        readinessProbe: {
+          httpGet: {
+            path: "/api/sessions",
+            port: ROUTER_PORT,
+            httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
           },
-        ],
+          initialDelaySeconds: 5,
+          periodSeconds: 10,
+          failureThreshold: 3,
+        },
+        livenessProbe: {
+          httpGet: {
+            path: "/api/sessions",
+            port: ROUTER_PORT,
+            httpHeaders: [{ name: "X-Auth-Request-Email", value: "healthcheck@probe" }],
+          },
+          initialDelaySeconds: 15,
+          periodSeconds: 30,
+          failureThreshold: 3,
+        },
       },
+      // Operator sidecar: shares pod SA, pull secrets, and network namespace
+      extraContainers: operatorSidecar,
     },
     {
-      // Depend on ExposedWebApp's routes to ensure the chain middleware exists
-      dependsOn: Array.isArray(app.route) ? app.route : [app.route],
+      // Deployment must wait for RBAC (serviceAccountName must exist),
+      // GHCR pull secret, and CF credentials secret (if operator is enabled).
+      dependsOn: [
+        roleBinding,
+        pullSecret,
+        ...(cfSecret ? [cfSecret] : []),
+      ],
     }
   );
-  void sessionRoute;
-
-  // -------------------------------------------------------------------------
-  // 8. Cloudflare DNS for session subdomains
-  //    Sessions are at <hash>.ocsession.<domain> — first-level subdomains,
-  //    covered by Cloudflare's Universal SSL wildcard (*.no-panic.org).
-  //    No paid Advanced Certificate Manager needed.
-  //
-  //    Two records are required:
-  //    - ocsession.<domain>   → Cloudflare must see this proxied hostname to
-  //                             activate its edge and issue the Universal SSL
-  //                             cert covering *.ocsession.<domain>.
-  //    - *.ocsession.<domain> → Routes all session hashes to the tunnel.
-  // -------------------------------------------------------------------------
-  if (cfg.cloudflare) {
-    void new cloudflare.Record(`${APP_NAME}-dns-ocsession`, {
-      zoneId: cfg.cloudflare.zoneId,
-      name: pulumi.interpolate`ocsession.${homelabConfig.domain}`,
-      type: "CNAME",
-      content: cfg.cloudflare.tunnelCname,
-      proxied: true,
-      ttl: 1,
-    });
-
-    void new cloudflare.Record(`${APP_NAME}-dns-wildcard`, {
-      zoneId: cfg.cloudflare.zoneId,
-      name: pulumi.interpolate`*.ocsession.${homelabConfig.domain}`,
-      type: "CNAME",
-      content: cfg.cloudflare.tunnelCname,
-      proxied: true,
-      ttl: 1,
-      allowOverwrite: true,
-    });
-  }
+  void app;
 
   // -------------------------------------------------------------------------
   // Return

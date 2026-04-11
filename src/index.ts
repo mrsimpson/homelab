@@ -184,6 +184,7 @@ export const opencodeUrl = opencodeApp.url;
 //
 const opencodeRouterApp = createOpencodeRouter(homelab, {
   routerImage: opencodeConfig.require("routerImage"),
+  cfOperatorImage: opencodeConfig.require("cfOperatorImage"),
   opencodeImage: opencodeConfig.require("opencodeImage"),
   anthropicApiKey: opencodeConfig.requireSecret("anthropicApiKey"),
   defaultGitRepo: opencodeConfig.get("defaultGitRepo"),
@@ -191,6 +192,8 @@ const opencodeRouterApp = createOpencodeRouter(homelab, {
   cloudflare: {
     zoneId: homelabConfig.cloudflare.zoneId,
     tunnelCname: baseInfra.cloudflare.tunnelCname,
+    tunnelId: baseInfra.cloudflare.tunnelId,
+    apiToken: new pulumi.Config("cloudflare").requireSecret("apiToken"),
   },
 });
 export const opencodeRouterUrl = opencodeRouterApp.url;

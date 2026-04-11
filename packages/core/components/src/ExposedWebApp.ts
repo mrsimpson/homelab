@@ -201,6 +201,13 @@ export interface ExposedWebAppArgs {
    * Each entry is a full Kubernetes container spec object.
    */
   initContainers?: object[];
+  /**
+   * Additional sidecar containers to run alongside the main app container.
+   * Each entry is a full Kubernetes container spec object.
+   * Sidecars share the pod's ServiceAccount, imagePullSecrets, and network namespace.
+   * Useful for operator sidecars, log shippers, proxies, etc.
+   */
+  extraContainers?: object[];
   /** ServiceAccount name to set on the pod spec (must already exist in the namespace) */
   serviceAccountName?: string;
   /** Container probes for the main app container */
@@ -533,7 +540,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                   ? undefined
                   : args.securityContext?.fsGroup || 1000,
               },
-              containers: [appContainer],
+              containers: [
+                appContainer,
+                ...((args.extraContainers ?? []) as k8s.types.input.core.v1.Container[]),
+              ],
               initContainers: args.initContainers as
                 | k8s.types.input.core.v1.Container[]
                 | undefined,
