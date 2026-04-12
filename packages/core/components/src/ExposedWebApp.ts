@@ -44,6 +44,30 @@ import * as pulumi from "@pulumi/pulumi";
  *   (the only level that permits hostPath volumes per the Kubernetes PSS spec).
  *   The pod itself still runs as non-root with all capabilities dropped.
  *
+ * ### Service account
+ * - `serviceAccountName` — set the pod's ServiceAccount (must already exist in the namespace).
+ *   Useful when the app needs RBAC permissions (e.g. managing pods via the K8s API).
+ *
+ * ### Health probes
+ * - `probes.readinessProbe` / `probes.livenessProbe` — standard Kubernetes probe objects
+ *   applied to the main app container. Omit to use no probes (Kubernetes default).
+ *
+ * ## OAuth2-Proxy middleware naming
+ *
+ * When `auth` is `AuthType.OAUTH2_PROXY`, three Traefik middlewares are created in the
+ * app's namespace with deterministic names:
+ * - `<name>-oauth2-forwardauth` — ForwardAuth check against oauth2-proxy
+ * - `<name>-oauth2-errors` — 401 → redirect to sign-in
+ * - `<name>-oauth2-chain` — chains errors + forwardauth
+ *
+ * Apps that need **additional IngressRoutes** (e.g. wildcard subdomain routes) can
+ * reference the chain middleware by name to share the same auth flow:
+ * ```yaml
+ * middlewares:
+ *   - name: <name>-oauth2-chain
+ *     namespace: <app-namespace>
+ * ```
+ *
  * ## Example
  * ```typescript
  * homelab.createExposedWebApp("blog", {
@@ -120,7 +144,7 @@ export interface OAuth2ProxyConfig {
 
 export interface ExposedWebAppArgs {
   /** Container image to deploy */
-  image: string;
+  image: string | pulumi.Output<string>;
   /** Fully qualified domain name */
   domain: string | pulumi.Output<string>;
   /** Container port */
@@ -177,6 +201,20 @@ export interface ExposedWebAppArgs {
    * Each entry is a full Kubernetes container spec object.
    */
   initContainers?: object[];
+  /**
+   * Additional sidecar containers to run alongside the main app container.
+   * Each entry is a full Kubernetes container spec object.
+   * Sidecars share the pod's ServiceAccount, imagePullSecrets, and network namespace.
+   * Useful for operator sidecars, log shippers, proxies, etc.
+   */
+  extraContainers?: object[];
+  /** ServiceAccount name to set on the pod spec (must already exist in the namespace) */
+  serviceAccountName?: string;
+  /** Container probes for the main app container */
+  probes?: {
+    readinessProbe?: object;
+    livenessProbe?: object;
+  };
 
   // Infrastructure dependencies (all optional)
   /** Cloudflare DNS configuration */
@@ -192,6 +230,7 @@ export interface ExposedWebAppArgs {
 }
 
 export class ExposedWebApp extends pulumi.ComponentResource {
+  public readonly namespace: k8s.core.v1.Namespace;
   public readonly deployment: k8s.apps.v1.Deployment;
   public readonly service: k8s.core.v1.Service;
   /** Route resource(s): single HTTPRoute (Authelia/NONE) or IngressRoute[] (OAuth2-Proxy) */
@@ -239,6 +278,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
         },
         childOpts
       );
+    this.namespace = namespace;
 
     // If creating a new namespace AND imagePullSecrets are specified,
     // automatically create ExternalSecrets for common pull secret names
@@ -417,6 +457,14 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       appContainer.args = args.args;
     }
 
+    // Add optional probes
+    if (args.probes?.readinessProbe) {
+      appContainer.readinessProbe = args.probes.readinessProbe;
+    }
+    if (args.probes?.livenessProbe) {
+      appContainer.livenessProbe = args.probes.livenessProbe;
+    }
+
     // Build volume mounts: storage PVC mount + any extra mounts
     const volumeMounts: object[] = [];
     if (args.storage && this.pvc) {
@@ -475,6 +523,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
               },
             },
             spec: {
+              serviceAccountName: args.serviceAccountName,
               imagePullSecrets: args.imagePullSecrets,
               nodeSelector: args.nodeSelector,
               securityContext: {
@@ -491,7 +540,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                   ? undefined
                   : args.securityContext?.fsGroup || 1000,
               },
-              containers: [appContainer],
+              containers: [
+                appContainer,
+                ...((args.extraContainers ?? []) as k8s.types.input.core.v1.Container[]),
+              ],
               initContainers: args.initContainers as
                 | k8s.types.input.core.v1.Container[]
                 | undefined,
@@ -842,12 +894,17 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           // Proxy through Cloudflare to enable both IPv4 and IPv6
           proxied: true,
           comment: `Managed by Pulumi - ${name}`,
+          // Allow Pulumi to take ownership of a pre-existing record with the
+          // same name/type (e.g. when migrating from manually-created records
+          // or when the Pulumi URN changes due to refactoring).
+          allowOverwrite: true,
         },
         childOpts
       );
     }
 
     this.registerOutputs({
+      namespaceName: this.namespace.metadata.name,
       deploymentName: this.deployment.metadata.name,
       serviceName: this.service.metadata.name,
       routeName: Array.isArray(this.route)

@@ -2,267 +2,220 @@
 
 ## Goal
 
-Make a containerized web application accessible from the internet via HTTPS with automatic TLS certificates.
+Make a containerized web application accessible from the internet via HTTPS, with automatic TLS, DNS, and optional authentication.
 
 ## Prerequisites
 
 - Cluster set up (see [setup-cluster.md](setup-cluster.md))
 - Container image (from Docker Hub, GHCR, or your own registry)
-- Domain name you want to use (e.g., `app.yourdomain.com`)
+- Domain name (apps use subdomains of your configured homelab domain)
 
 ## Steps
 
-### 1. Create Application File
+### 1. Create the App Package
 
 ```bash
 mkdir -p packages/apps/my-app/src
-cd packages/apps/my-app
-touch package.json tsconfig.json src/index.ts
 ```
+
+Create `packages/apps/my-app/package.json`:
+
+```json
+{
+  "name": "@mrsimpson/homelab-app-my-app",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@mrsimpson/homelab-config": "*",
+    "@mrsimpson/homelab-core-components": "*"
+  },
+  "peerDependencies": {
+    "@pulumi/pulumi": "^3.137.0",
+    "@pulumi/kubernetes": "^4.0.0"
+  }
+}
+```
+
+Create `packages/apps/my-app/tsconfig.json`:
+
+```json
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src"]
+}
+```
+
+### 2. Write the App Module
 
 Create `packages/apps/my-app/src/index.ts`:
 
 ```typescript
 import { homelabConfig } from "@mrsimpson/homelab-config";
-import type { HomelabContext } from "@mrsimpson/homelab-core-components";
+import type { HomelabContext, ExposedWebApp } from "@mrsimpson/homelab-core-components";
 import * as pulumi from "@pulumi/pulumi";
 
-export function createMyApp(homelab: HomelabContext) {
-  const domain = "app.yourdomain.com";
-  
+export function createMyApp(homelab: HomelabContext): {
+  app: ExposedWebApp;
+  url: pulumi.Output<string>;
+} {
+  const domain = pulumi.interpolate`my-app.${homelabConfig.domain}`;
+
   const app = homelab.createExposedWebApp("my-app", {
-    image: "nginx:alpine",
+    image: "nginxinc/nginx-unprivileged:alpine",
     domain,
-    port: 80
+    port: 8080,
   });
-  
+
   return { app, url: pulumi.interpolate`https://${domain}` };
 }
 ```
 
-### 2. Import in Root
+`homelab.createExposedWebApp()` injects shared infrastructure (Cloudflare DNS, TLS, Gateway API, External Secrets) automatically — you only specify what's unique to your app.
+
+### 3. Wire into the Root Stack
 
 Edit `src/index.ts`:
 
 ```typescript
-// ... existing imports
 import { createMyApp } from "@mrsimpson/homelab-app-my-app";
 
-const myAppResult = createMyApp(homelab);
-export const myAppUrl = myAppResult.url;
+const myApp = createMyApp(homelab);
+export const myAppUrl = myApp.url;
 ```
 
-### 3. Deploy
+Add the workspace dependency to root `package.json`:
+
+```json
+"dependencies": {
+  "@mrsimpson/homelab-app-my-app": "*"
+}
+```
+
+### 4. Deploy
 
 ```bash
-cd homelab/infrastructure
+npm install   # resolve workspace link
 pulumi up
 ```
-
-Pulumi shows what will be created:
-
-```
-Previewing update (dev):
-  + homelab:ExposedWebApp  my-app       create
-  +  ├─ kubernetes:apps/v1:Deployment    my-app        create
-  +  ├─ kubernetes:core/v1:Service        my-app        create
-  +  ├─ kubernetes:networking/v1:Ingress  my-app        create
-  +  ├─ cloudflare:index:Record           my-app-dns    create
-  +  └─ cloudflare:index:TunnelRoute      my-app-route  create
-
-Resources:
-  + 6 to create
-```
-
-Type `yes` to deploy.
-
-### 4. Wait for DNS Propagation
-
-DNS changes can take 30-120 seconds to propagate.
-
-```bash
-# Check if DNS resolves
-dig app.yourdomain.com
-
-# Should show Cloudflare IP addresses
-```
-
-### 5. Verify
-
-```bash
-# Check deployment
-kubectl get deployment my-app
-# Should show READY 1/1
-
-# Check ingress
-kubectl get ingress my-app
-# Should show HOST and ADDRESS
-
-# Test access
-curl https://app.yourdomain.com
-# Should return app response
-```
-
-Visit `https://app.yourdomain.com` in browser - should see your app!
 
 ## What Gets Created
 
-When you instantiate `ExposedWebApp`, Pulumi creates:
+`ExposedWebApp` creates these resources automatically:
 
-1. **Kubernetes Deployment**
-   - Runs your container
-   - Manages replicas (default: 1)
-   - Restarts if crashed
+1. **Namespace** — with Pod Security Standards labels (unless you pass a pre-created one)
+2. **Deployment** — runs your container with security hardening (non-root, drop ALL caps, seccomp)
+3. **Service** — ClusterIP, maps port 80 → your container port
+4. **Route** — HTTPRoute (Gateway API) or IngressRoute[] (Traefik CRD), depending on auth mode
+5. **DNS record** — Cloudflare CNAME pointing to the Cloudflare Tunnel
+6. **ExternalSecret** — GHCR pull credentials (when `imagePullSecrets` references `ghcr-pull-secret`)
+7. **PVC** — persistent storage (when `storage` is set)
 
-2. **Kubernetes Service**
-   - ClusterIP service
-   - Routes traffic to deployment pods
-   - Internal load balancing
+## Authentication
 
-3. **Kubernetes Ingress**
-   - Routes HTTP(S) traffic based on hostname
-   - Managed by ingress-nginx controller
-   - Annotations for cert-manager
+Three modes are available via the `auth` field:
 
-4. **TLS Certificate**
-   - cert-manager requests from Let's Encrypt
-   - Automatically renewed every 90 days
-   - Stored in Kubernetes Secret
-
-5. **Cloudflare DNS Record**
-   - CNAME pointing to Cloudflare Tunnel endpoint
-   - `app.yourdomain.com` → `tunnel-id.cfargotunnel.com`
-
-6. **Cloudflare Tunnel Route**
-   - Tells tunnel to route `app.yourdomain.com` to cluster Ingress
-
-## Common Examples
-
-### Static Website
+### No auth (default)
 
 ```typescript
-export const blog = new ExposedWebApp("blog", {
+homelab.createExposedWebApp("my-app", {
   image: "nginx:alpine",
-  domain: "blog.yourdomain.com",
-  port: 80
-});
-```
-
-### Ghost Blog
-
-```typescript
-export const ghost = new ExposedWebApp("ghost", {
-  image: "ghost:5",
-  domain: "blog.yourdomain.com",
-  port: 2368,
-  storage: {
-    size: "10Gi",
-    mountPath: "/var/lib/ghost/content"
-  }
-});
-```
-
-### Grafana Dashboard
-
-```typescript
-export const grafana = new ExposedWebApp("grafana", {
-  image: "grafana/grafana:latest",
-  domain: "grafana.yourdomain.com",
-  port: 3000,
-  storage: {
-    size: "5Gi",
-    mountPath: "/var/lib/grafana"
-  }
-});
-```
-
-### Home Assistant
-
-```typescript
-export const homeAssistant = new ExposedWebApp("home-assistant", {
-  image: "homeassistant/home-assistant:stable",
-  domain: "home.yourdomain.com",
-  port: 8123,
-  storage: {
-    size: "20Gi",
-    mountPath: "/config"
-  }
-});
-```
-
-## Configuration Options
-
-### Required Args
-
-```typescript
-{
-  image: string;    // Container image (e.g., "nginx:latest")
-  domain: string;   // Public domain (e.g., "app.example.com")
-  port: number;     // Port the container listens on
-}
-```
-
-### Optional Args
-
-```typescript
-{
-  oauth?: {
-    // See add-oauth-protection.md
-  },
-
-  storage?: {
-    size: string;           // e.g., "10Gi"
-    mountPath: string;      // e.g., "/data"
-    storageClass?: string;  // default: "nfs"
-  },
-
-  resources?: {
-    requests?: { cpu?: string; memory?: string; },
-    limits?: { cpu?: string; memory?: string; }
-  },
-
-  env?: Array<{
-    name: string;
-    value?: string;
-    valueFrom?: { secretKeyRef?: {...}, configMapKeyRef?: {...} }
-  }>
-}
-```
-
-## Updating an Application
-
-### Change Image Version
-
-```typescript
-export const myApp = new ExposedWebApp("my-app", {
-  image: "nginx:1.25",  // Changed from "nginx:alpine"
-  domain: "app.yourdomain.com",
-  port: 80
-});
-```
-
-```bash
-pulumi up
-# Kubernetes will perform rolling update
-```
-
-### Add Storage
-
-```typescript
-export const myApp = new ExposedWebApp("my-app", {
-  image: "nginx:alpine",
-  domain: "app.yourdomain.com",
+  domain,
   port: 80,
-  storage: {
-    size: "5Gi",
-    mountPath: "/usr/share/nginx/html"
-  }
+  // auth defaults to AuthType.NONE — public access
 });
 ```
 
-```bash
-pulumi up
-# Creates PVC and mounts to pod
+Uses Gateway API HTTPRoute.
+
+### Authelia forward auth
+
+```typescript
+import { AuthType } from "@mrsimpson/homelab-core-components";
+
+homelab.createExposedWebApp("my-app", {
+  image: "nginx:alpine",
+  domain,
+  port: 80,
+  auth: AuthType.FORWARD,
+});
+```
+
+Uses Gateway API HTTPRoute with a ForwardAuth middleware pointing to Authelia. Access is controlled via Authelia policies. See [use-forward-auth.md](use-forward-auth.md).
+
+### OAuth2-Proxy (GitHub OAuth)
+
+```typescript
+import { AuthType } from "@mrsimpson/homelab-core-components";
+
+homelab.createExposedWebApp("my-app", {
+  image: "nginx:alpine",
+  domain,
+  port: 80,
+  auth: AuthType.OAUTH2_PROXY,
+  oauth2Proxy: { group: "users" },
+});
+```
+
+Uses Traefik IngressRoutes with a ForwardAuth → Errors → Chain middleware stack. Authenticates against the centralized oauth2-proxy deployment (GitHub OAuth). Access is controlled by email allowlists per group — see [manage-access-control.md](manage-access-control.md) and [OAUTH2_PROXY.md](../OAUTH2_PROXY.md).
+
+## Common Options
+
+```typescript
+homelab.createExposedWebApp("my-app", {
+  // Required
+  image: "my-image:latest",
+  domain: pulumi.interpolate`app.${homelabConfig.domain}`,
+  port: 8080,
+
+  // Replicas
+  replicas: 2,
+
+  // Persistent storage
+  storage: { size: "10Gi", mountPath: "/data", storageClass: "longhorn" },
+
+  // Resources
+  resources: {
+    requests: { cpu: "100m", memory: "128Mi" },
+    limits: { cpu: "500m", memory: "512Mi" },
+  },
+
+  // Environment variables
+  env: [{ name: "DATABASE_URL", value: "postgres://..." }],
+
+  // Container overrides
+  command: ["/bin/sh"],
+  args: ["-c", "my-entrypoint.sh"],
+
+  // Extra volumes (ConfigMaps, hostPath, etc.)
+  extraVolumes: [{ name: "cfg", configMap: { name: "my-config" } }],
+  extraVolumeMounts: [{ name: "cfg", mountPath: "/etc/app" }],
+
+  // Init containers
+  initContainers: [{ name: "migrate", image: "my-app:latest", command: ["migrate"] }],
+
+  // Service account (must already exist in the namespace)
+  serviceAccountName: "my-app",
+
+  // Health probes
+  probes: {
+    readinessProbe: { httpGet: { path: "/healthz", port: 8080 } },
+    livenessProbe: { httpGet: { path: "/healthz", port: 8080 } },
+  },
+
+  // Node pinning (required for hostPath volumes)
+  nodeSelector: { "kubernetes.io/hostname": "my-node" },
+
+  // Private registry
+  imagePullSecrets: [{ name: "ghcr-pull-secret" }],
+
+  // Security
+  securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 },
+
+  // Pre-created namespace (skip auto-creation)
+  namespace: myNamespace,
+});
 ```
 
 ## Troubleshooting
@@ -270,89 +223,34 @@ pulumi up
 ### 502 Bad Gateway
 
 ```bash
-# Check if pod is running
-kubectl get pods -l app=my-app
-
-# Check pod logs
-kubectl logs deployment/my-app
-
-# Common causes:
-# - App not listening on specified port
-# - App crashed (check logs)
-# - Container health check failing
+kubectl get pods -n my-app
+kubectl logs -n my-app deployment/my-app
 ```
+
+Common causes: app not listening on the specified port, app crashed, container image wrong.
 
 ### 404 Not Found
 
-```bash
-# Check ingress
-kubectl get ingress my-app
-
-# Verify HOST matches your domain
-kubectl describe ingress my-app
-
-# Common causes:
-# - Domain typo in configuration
-# - Ingress controller not running
-```
-
-### Certificate Pending
+Check the route was created:
 
 ```bash
-# Check certificate status
-kubectl get certificate
+# For Gateway API (AuthType.NONE or AuthType.FORWARD)
+kubectl get httproute -n my-app
 
-# Describe certificate for details
-kubectl describe certificate my-app-tls
-
-# Common causes:
-# - DNS not propagated yet (wait 2-3 minutes)
-# - Let's Encrypt rate limit
-# - Cloudflare proxy blocking validation
+# For OAuth2-Proxy (AuthType.OAUTH2_PROXY)
+kubectl get ingressroute -n my-app
 ```
 
 ### DNS Not Resolving
 
 ```bash
-# Check Cloudflare dashboard
-# Verify DNS record was created
-
-# Check Pulumi state
-pulumi stack output
-
-# Manually verify:
 dig app.yourdomain.com
-# Should show Cloudflare IPs
 ```
 
-### App Not Accessible
-
-```bash
-# Check all components:
-kubectl get deployment,service,ingress,certificate
-
-# Check Cloudflare Tunnel
-kubectl logs -n cloudflare deployment/cloudflared
-
-# Verify tunnel route in Cloudflare dashboard
-```
+DNS propagation can take 30–120 seconds. Verify the Cloudflare DNS record exists in the dashboard.
 
 ## Next Steps
 
-- [Add OAuth Protection](add-oauth-protection.md) - Secure your app with authentication
-- [Set Up Persistent Storage](setup-persistent-storage.md) - Configure NFS for stateful apps
-- [Deploy a Database](deploy-database.md) - Add a database to your app
-
-## Removing an Application
-
-```typescript
-// Comment out or delete from src/apps/my-app.ts
-// export const myApp = new ExposedWebApp(...);
-```
-
-```bash
-pulumi up
-# Pulumi will destroy the resources
-```
-
-Or delete the entire file and remove the import from `index.ts`.
+- [Add OAuth Protection](add-oauth-protection.md) — protect your app with GitHub OAuth
+- [Set Up Persistent Storage](setup-persistent-storage.md) — configure storage for stateful apps
+- [Deploy a Database](deploy-database.md) — add a database to your app

@@ -25,13 +25,13 @@ RUN printf 'https://dl-cdn.alpinelinux.org/alpine/edge/main\nhttps://dl-cdn.alpi
     chown root:root /usr/local/bin/bd /usr/local/bin/beads /usr/local/bin/gh && \
     chmod 755 /usr/local/bin/bd /usr/local/bin/beads /usr/local/bin/gh
 
-# Add a non-root user that mirrors the home directory opencode already uses.
-# opencode writes to ~/.local, ~/.cache, ~/.config and ~/.bun — all under /root
-# in the upstream image. We keep HOME=/root so those paths still resolve, but
-# the process no longer runs as UID 0.
+# Add a proper non-root user with a conventional home directory.
+# opencode writes to ~/.local, ~/.cache, ~/.config and ~/.opencode — all under $HOME.
+# Using /home/opencode makes it clear this is a non-root user's home, not the root account.
 RUN addgroup -S opencode && \
-    adduser  -S -u 1000 -G opencode -h /root -s /bin/sh opencode && \
-    chown -R opencode:opencode /root
+    adduser  -S -u 1000 -G opencode -h /home/opencode -s /bin/sh opencode && \
+    mkdir -p /home/opencode && \
+    chown -R opencode:opencode /home/opencode
 
 USER opencode
-ENV HOME=/root
+ENV HOME=/home/opencode

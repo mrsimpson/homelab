@@ -1,0 +1,48 @@
+{
+  "name": "@mrsimpson/homelab-app-opencode-router",
+  "version": "0.1.0",
+  "description": "opencode-router deployment for homelab — per-user isolated OpenCode instances protected by GitHub OAuth",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "pulumi",
+    "kubernetes",
+    "homelab",
+    "app",
+    "opencode",
+    "opencode-router",
+    "ai",
+    "oauth2-proxy",
+    "multi-tenant"
+  ],
+  "author": "mrsimpson",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrsimpson/homelab.git",
+    "directory": "packages/apps/opencode-router"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@mrsimpson/homelab-core-components": "*",
+    "@mrsimpson/homelab-config": "*"
+  },
+  "peerDependencies": {
+    "@pulumi/pulumi": "^3.137.0",
+    "@pulumi/kubernetes": "^4.0.0",
+    "@pulumi/cloudflare": "^5.0.0"
+  }
+}
