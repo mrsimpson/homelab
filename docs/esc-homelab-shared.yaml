@@ -1,0 +1,65 @@
+# Pulumi ESC environment: homelab/shared
+# This environment provides shared secrets for external apps deploying to the homelab cluster.
+#
+# IMPORTANT: This file is a reference template. Do NOT commit real secret values here.
+# The actual environment lives in Pulumi Cloud and is managed by the homelab maintainer.
+#
+# To create this environment in Pulumi Cloud:
+#   pulumi env init homelab/shared
+#   pulumi env edit homelab/shared   # paste the 'values:' block below, filling in real values
+#
+# To verify the environment after creation:
+#   pulumi env get homelab/shared
+#   pulumi env open homelab/shared   # shows resolved values (redacts secrets)
+#
+# External repos reference this environment in their Pulumi.yaml with:
+#   environment:
+#     - homelab/shared
+#
+# The homelab stack itself also imports this environment in its Pulumi.dev.yaml:
+#   environment:
+#     - homelab/shared
+# This ensures the single source of truth: secrets are defined once in ESC and consumed
+# by both the homelab stack and any external app stacks.
+
+values:
+  cloudflare:
+    # Cloudflare API token with Zone:DNS:Edit permissions for the homelab domain.
+    # Needed by external apps that use ExposedWebApp (creates Cloudflare DNS records).
+    # Generate at: https://dash.cloudflare.com/profile/api-tokens
+    apiToken:
+      fn::secret: "<your-cloudflare-api-token>"
+
+  ghcr:
+    # GitHub Container Registry credentials for pulling homelab images AND
+    # installing @mrsimpson/homelab-core-components from the GitHub npm registry.
+    # The username is your GitHub handle (e.g. mrsimpson).
+    # The token needs: read:packages  (for docker pull + npm install)
+    # Generate at: https://github.com/settings/tokens (classic PAT)
+    username: "<github-username>"
+    token:
+      fn::secret: "<github-personal-access-token-with-read:packages>"
+
+  pulumi:
+    # Pulumi access token — needed by external app CI pipelines to run `pulumi up`
+    # and to read homelab stack outputs via StackReference.
+    # Generate at: https://app.pulumi.com/<org>/settings/access-tokens
+    accessToken:
+      fn::secret: "<pulumi-access-token>"
+    # Pulumi Cloud organization name (e.g. mrsimpson).
+    # External apps use this to construct the StackReference:
+    #   organization/homelab/dev
+    organization: "<pulumi-organization>"
+
+  # These keys are exposed as Pulumi stack config values when the ESC environment
+  # is imported. External stacks can read them via pulumi.Config() without any
+  # extra setup.
+  #
+  # Naming convention: the key names here map to how Pulumi ESC injects them into
+  # config. Providers look for specific namespaces (e.g. cloudflare:apiToken).
+  pulumiConfig:
+    cloudflare:apiToken: ${cloudflare.apiToken}
+    ghcr:username: ${ghcr.username}
+    ghcr:token: ${ghcr.token}
+    homelab:pulumiAccessToken: ${pulumi.accessToken}
+    homelab:pulumiOrganization: ${pulumi.organization}

@@ -6,6 +6,8 @@
 
 export { ExposedWebApp, AuthType } from "./ExposedWebApp";
 export { HomelabContext } from "./homelab-context";
+export { createHomelabContextFromStack } from "./createHomelabContextFromStack";
+export type { HomelabContextFromStackOptions } from "./createHomelabContextFromStack";
 export {
   createGhcrImagePullSecret,
   createDockerHubImagePullSecret,
