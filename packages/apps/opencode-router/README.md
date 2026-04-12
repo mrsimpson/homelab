@@ -8,8 +8,8 @@ Each authenticated user gets a dedicated Pod + PVC per (repo, branch) pair, mana
 
 ```
 Internet → Cloudflare Tunnel → Traefik
-  ├─ opencode-router.<domain>      → [OAuth2 chain] → Router (port 3000)  ← setup UI + API
-  └─ <hash>-oc.<domain>            → [OAuth2 chain] → Router → session Pod (port 4096)
+  ├─ code.<domain>              → [OAuth2 chain] → Router (port 3000)  ← setup UI + API
+  └─ <hash>-oc.<domain>         → [OAuth2 chain] → Router → session Pod (port 4096)
 ```
 
 Session hostnames (`<hash>-oc.<domain>`) are **first-level subdomains** of the base domain, covered by the existing `*.<domain>` Cloudflare Universal SSL certificate — no Advanced Certificate Manager required.
@@ -64,15 +64,13 @@ const router = createOpencodeRouter(homelab, {
 
 ## Config Variables
 
-Set via `pulumi config` under the `opencode` namespace:
+Set via `pulumi config` under the `code` namespace:
 
 | Key | Required | Description |
 |---|---|---|
-| `opencode:routerImage` | Yes | Router container image tag |
-| `opencode:cfOperatorImage` | Yes | Cloudflare operator sidecar image tag |
-| `opencode:opencodeImage` | Yes | Per-session pod container image tag |
-| `opencode:anthropicApiKey` | Yes (secret) | Anthropic API key for session pods |
-| `opencode:cfTunnelId` | Yes (secret) | Cloudflare Tunnel ID |
-| `opencode:cfApiToken` | Yes (secret) | Cloudflare API token (DNS:Edit + Zone:Read) |
-| `opencode:defaultGitRepo` | No | Git repo to auto-clone for new sessions |
-| `opencode:storageSize` | No | PVC size per session (default: `2Gi`) |
+| `code:routerImage` | Yes | Router container image tag |
+| `code:cfOperatorImage` | Yes | Cloudflare operator sidecar image tag |
+| `code:opencodeImage` | Yes | Per-session pod container image tag |
+| `code:anthropicApiKey` | Yes (secret) | Anthropic API key for session pods |
+| `code:defaultGitRepo` | No | Git repo to auto-clone for new sessions |
+| `code:storageSize` | No | PVC size per session (default: `2Gi`) |
