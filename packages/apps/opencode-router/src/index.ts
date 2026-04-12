@@ -358,7 +358,7 @@ export function createOpencodeRouter(
   //    from the shared infrastructure config, creating the main DNS record
   //    (opencode-router.<domain>) automatically.
   // -------------------------------------------------------------------------
-  const domain = pulumi.interpolate`opencode-router.${homelabConfig.domain}`;
+  const domain = pulumi.interpolate`code.${homelabConfig.domain}`;
 
   const app = homelab.createExposedWebApp(
     APP_NAME,
