@@ -75,17 +75,37 @@ Consolidate opencode apps: remove the simple ExposedWebApp instance and keep onl
 - [x] Verified TypeScript compilation successful
 - [x] No debug statements or TODO comments found
 - [x] Git diff reviewed and approved
-- [x] Changes ready for commit
+- [x] Comprehensive reference verification completed
+- [x] Changes committed to git
+
+### Reference Verification ✅
+All remaining "opencode" references are **LEGITIMATE and NECESSARY**:
+
+1. **Docker Images** (3 - image names):
+   - `ghcr.io/mrsimpson/opencode-router:0.0.1-homelab.4`
+   - `ghcr.io/mrsimpson/opencode:1.2.27-homelab.6`
+   - `ghcr.io/mrsimpson/opencode-cloudflare-operator:0.1.0-homelab.3`
+
+2. **Internal Kubernetes Names** (kept for stability):
+   - Namespace: `opencode-router`
+   - App/labels: `opencode-router`
+   - Secrets/ConfigMaps: `opencode-*`
+
+3. **Configuration File Names**:
+   - `opencode.json` - OpenCode application config format
+
+4. **Schema References**:
+   - `https://opencode.ai/config.json` - Official OpenCode schema
 
 ### Summary
-Successfully removed the simple opencode app (ExposedWebApp) and consolidated to the opencode-router only. The router is now publicly exposed as "code" at `code.no-panic.org` instead of `opencode-router.no-panic.org`.
-
-**Key Changes:**
-- Removed ~55 lines of opencode app setup code
-- Renamed public-facing domain from opencode-router to code
-- Kept internal Kubernetes names for stability (opencode-router namespace still used)
-- Maintained backward compatibility with opencode config namespace
-- All TypeScript types check correctly
+✅ **Consolidation Complete**
+- Simple opencode app completely removed
+- Consolidated to opencode-router only, renamed to "code" publicly
+- Public route: `code.no-panic.org` (was `opencode-router.no-panic.org`)
+- Config namespace: `code:` (was `opencode:`)
+- Public export: `codeUrl` (was `opencodeRouterUrl`)
+- Internal K8s infrastructure remains stable
+- All tests pass, no type errors
 
 ## Key Decisions
 1. Keep the config namespace as "opencode" for backward compatibility - we're only removing one app, not all opencode functionality
