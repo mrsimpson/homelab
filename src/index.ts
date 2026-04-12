@@ -1,4 +1,3 @@
-import * as nodePath from "node:path";
 import * as pulumi from "@pulumi/pulumi";
 
 // Main entry point for homelab infrastructure
@@ -7,8 +6,8 @@ import * as pulumi from "@pulumi/pulumi";
 export const pulumiProject = pulumi.getProject();
 export const pulumiStack = pulumi.getStack();
 
-// Scoped config for the opencode app (keys set under the "opencode" namespace)
-const opencodeConfig = new pulumi.Config("opencode");
+// Scoped config for the code app (keys set under the "code" namespace)
+const codeConfig = new pulumi.Config("code");
 
 // Import base infrastructure which sets up all core components
 import { setupBaseInfra } from "@mrsimpson/homelab-base-infra";
@@ -62,7 +61,6 @@ export const oauth2ProxyInstances = oauth2ProxyReleases;
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
-import { createOpencode } from "@mrsimpson/homelab-app-opencode";
 import { createOpencodeRouter } from "@mrsimpson/homelab-app-opencode-router";
 import { AuthType } from "@mrsimpson/homelab-core-components";
 
@@ -121,74 +119,25 @@ export const longhornUI = {
   command: "kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80",
 };
 
-// opencode - AI coding agent, protected by GitHub OAuth
-//
-// All settings are read from Pulumi config under the "opencode" namespace.
-// Set them with:
-//
-//   # Required — host workspace and node pinning:
-//   pulumi config set opencode:hostWorkspacePath "/home/oliver/projects"
-//   pulumi config set opencode:hostNode          "flinker"
-//
-//   # Remote provider credentials (secrets):
-//   pulumi config set opencode:anthropicApiKey <key> --secret
-//   pulumi config set opencode:openaiApiKey    <key> --secret
-//
-//   # Local llama.cpp provider (plain values, all optional):
-//   pulumi config set opencode:llamaCppBaseUrl   "http://flinker:8080/v1"
-//   pulumi config set opencode:llamaCppModelId   "qwen2.5-coder"
-//   pulumi config set opencode:llamaCppModelName "Qwen 2.5 Coder (local)"
-//
-const llamaCppBaseUrl = opencodeConfig.get("llamaCppBaseUrl");
-const llamaCppModelId = opencodeConfig.get("llamaCppModelId") ?? "local-model";
-const llamaCppModelName = opencodeConfig.get("llamaCppModelName") ?? "Local Model (llama.cpp)";
-
-const opencodeApp = createOpencode(homelab, {
-  // Required — host filesystem mount and node pinning
-  hostWorkspacePath: opencodeConfig.require("hostWorkspacePath"),
-  hostNode: opencodeConfig.require("hostNode"),
-
-  // Local LLM via llama.cpp — only configured when llamaCppBaseUrl is set
-  llamaCppBaseUrl: llamaCppBaseUrl,
-  llamaCppModels: llamaCppBaseUrl
-    ? [
-        {
-          id: llamaCppModelId,
-          name: llamaCppModelName,
-          contextLimit: Number(opencodeConfig.get("llamaCppContextLimit") ?? 262144),
-          outputLimit: Number(opencodeConfig.get("llamaCppOutputLimit") ?? 8192),
-        },
-      ]
-    : undefined,
-
-  // Config directory — all files under this path are mounted verbatim as
-  // ~/.config/opencode/ inside the container (agents, MCP servers, etc.)
-  configDir: nodePath.join(__dirname, "../packages/apps/opencode/config"),
-
-  // Remote provider credentials — add keys for whichever providers you use
-  providerEnv: [
-    { name: "ANTHROPIC_API_KEY", value: opencodeConfig.requireSecret("anthropicApiKey") },
-    // { name: "OPENAI_API_KEY", value: opencodeConfig.requireSecret("openaiApiKey") },
-  ],
-});
-export const opencodeUrl = opencodeApp.url;
-
-// opencode-router — per-user isolated OpenCode instances, protected by GitHub OAuth
+// code — per-user isolated OpenCode instances, protected by GitHub OAuth
 //
 // Each authenticated user gets their own Pod + PVC managed dynamically by the router.
 // The router reads X-Auth-Request-Email (forwarded by oauth2-proxy) to identify users.
 //
+// All settings are read from Pulumi config under the "code" namespace.
 // Set config with:
-//   pulumi config set opencode:routerImage "ghcr.io/mrsimpson/opencode-router:0.0.1-homelab.1"
-//   # opencodeImage and anthropicApiKey already set from the opencode app config
+//   pulumi config set code:routerImage "ghcr.io/mrsimpson/opencode-router:0.0.1-homelab.1"
+//   pulumi config set code:cfOperatorImage "ghcr.io/mrsimpson/opencode-cloudflare-operator:0.1.0-homelab.3"
+//   pulumi config set code:opencodeImage "ghcr.io/mrsimpson/opencode:1.2.27-homelab.6"
+//   pulumi config set code:anthropicApiKey <key> --secret
 //
-const opencodeRouterApp = createOpencodeRouter(homelab, {
-  routerImage: opencodeConfig.require("routerImage"),
-  cfOperatorImage: opencodeConfig.require("cfOperatorImage"),
-  opencodeImage: opencodeConfig.require("opencodeImage"),
-  anthropicApiKey: opencodeConfig.requireSecret("anthropicApiKey"),
-  defaultGitRepo: opencodeConfig.get("defaultGitRepo"),
-  storageSize: opencodeConfig.get("storageSize") ?? "2Gi",
+const codeApp = createOpencodeRouter(homelab, {
+  routerImage: codeConfig.require("routerImage"),
+  cfOperatorImage: codeConfig.require("cfOperatorImage"),
+  opencodeImage: codeConfig.require("opencodeImage"),
+  anthropicApiKey: codeConfig.requireSecret("anthropicApiKey"),
+  defaultGitRepo: codeConfig.get("defaultGitRepo"),
+  storageSize: codeConfig.get("storageSize") ?? "2Gi",
   cloudflare: {
     zoneId: homelabConfig.cloudflare.zoneId,
     tunnelCname: baseInfra.cloudflare.tunnelCname,
@@ -196,4 +145,4 @@ const opencodeRouterApp = createOpencodeRouter(homelab, {
     apiToken: new pulumi.Config("cloudflare").requireSecret("apiToken"),
   },
 });
-export const opencodeRouterUrl = opencodeRouterApp.url;
+export const codeUrl = codeApp.url;

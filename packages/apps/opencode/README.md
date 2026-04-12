@@ -1,5 +1,13 @@
 # @mrsimpson/homelab-app-opencode
 
+⚠️ **DEPRECATED** — This app has been consolidated into [`@mrsimpson/homelab-app-opencode-router`](../opencode-router/README.md). The router provides per-user isolated instances which is the preferred approach. This simple deployment is no longer used in the homelab.
+
+For the current opencode deployment, see: [`@mrsimpson/homelab-app-opencode-router`](../opencode-router/README.md)
+
+---
+
+**Legacy Documentation** (preserved for reference):
+
 [opencode](https://opencode.ai) AI coding agent deployed as a GitHub-OAuth-protected web app.
 
 ## Access
