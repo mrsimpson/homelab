@@ -43,6 +43,18 @@ This is additive — the existing single-user `opencode` deployment stays unchan
 - **workingDir fix for opencode container** — `opencode serve` determines the project directory from `process.cwd()` (via `WorkspaceRouterMiddleware` fallback in `server/router.ts`). Without an explicit `workingDir`, the container starts in `/` or `/root` — neither is a git repo. The init container clones the repo into `/workspace` (subPath `projects` on the PVC → `<PVC>/projects/`). The main container mounts the full PVC at `/home/opencode` with no subPath, so the repo is at `/home/opencode/projects/`. Fix: set `workingDir: "/home/opencode/projects"` on the main container spec in `ensurePod()`.
 - **User home dir: `/home/opencode` not `/root`** — the upstream opencode image set `HOME=/root` for UID 1000, which is confusing (looks like root). The homelab `images/opencode/Dockerfile` now creates the user with `-h /home/opencode` and `ENV HOME=/home/opencode`. All pod volume mounts updated accordingly: PVC → `/home/opencode`, ConfigMap → `/home/opencode/.opencode`, `workingDir` → `/home/opencode/projects`. Both Dockerfile and pod-manager committed and pushed.
 
+### Architecture Updates (post-initial-deployment)
+
+The following decisions were made after the initial deployment and supersede the original plan above:
+
+- **ExposedWebApp refactor** — the 572-line manual K8s resource list was replaced with `ExposedWebApp` (see `development-plan-opencode-router-exposedwebapp.md`). The ExternalSecret for GHCR is still created explicitly because the namespace is pre-created.
+- **Session URL pattern changed** — original plan used `<hash>.opencode-router.<domain>` (second-level subdomain). This requires Cloudflare Advanced Certificate Manager (paid). Changed to `<hash>-oc.<domain>` (first-level, dash not dot), covered by the existing `*.<domain>` Universal SSL wildcard cert.
+- **Cloudflare operator sidecar** — a new sidecar container (`opencode-cloudflare-operator`) runs alongside the router in the same pod. It watches session pods and creates/deletes per-session DNS records, Cloudflare Tunnel routes, and Traefik IngressRoutes at runtime. Source: `images/opencode-cloudflare-operator/`.
+- **ROUTER_DOMAIN / ROUTE_SUFFIX env vars** — `ROUTER_DOMAIN=no-panic.org` (the base domain), `ROUTE_SUFFIX=-oc`. Session URL: `https://<hash>-oc.no-panic.org`. Local dev: `ROUTE_SUFFIX=""`, `ROUTER_DOMAIN=localhost:3002`.
+- **`api.ts` bug fixed** — `sessionUrl()` was missing `config.routeSuffix` in the URL template, causing redirects to the wrong hostname.
+- **Operator idempotency** — `createDnsRecord` catches the Cloudflare "already exists" error to handle the race between 2 operator replicas both trying to create the same record simultaneously.
+- **Per-session (not per-user)** — the session key is `(email, repoUrl, branch)`, not just email. Each unique combination gets its own pod + PVC + subdomain.
+
 ### WIP — Known Issues (not yet fixed)
 
 - **Branch detection** — the branch field in the session form is manually entered. The desired UX is to auto-detect the current branch of the local checkout (not the branch the fork was cut from). Needs a mechanism to pass the branch from the client side (e.g. read from git metadata or let the user pick from a fetched list).

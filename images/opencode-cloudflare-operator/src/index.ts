@@ -8,6 +8,7 @@ import {
   deleteTunnelRoute,
   getTunnelCname,
 } from "./cloudflare.js";
+import { createIngressRoutes, deleteIngressRoutes } from "./ingressroute.js";
 
 // ---------------------------------------------------------------------------
 // Kubernetes client
@@ -37,8 +38,12 @@ async function onPodAdded(pod: k8s.V1Pod): Promise<void> {
 
   try {
     const tunnelCname = await getTunnelCname();
-    // Create DNS record and tunnel route in parallel
-    await Promise.all([createDnsRecord(hostname, tunnelCname), createTunnelRoute(hostname)]);
+    // Create DNS record, tunnel route, and Traefik IngressRoutes in parallel
+    await Promise.all([
+      createDnsRecord(hostname, tunnelCname),
+      createTunnelRoute(hostname),
+      createIngressRoutes(hostname),
+    ]);
     console.log(`Provisioned ${hostname}`);
   } catch (err) {
     console.error(`Failed to provision ${hostname}:`, err);
@@ -56,7 +61,11 @@ async function onPodDeleted(pod: k8s.V1Pod): Promise<void> {
   console.log(`Pod deleted: ${pod.metadata?.name} → deprovisioning ${hostname}`);
 
   try {
-    await Promise.all([deleteDnsRecord(hostname), deleteTunnelRoute(hostname)]);
+    await Promise.all([
+      deleteDnsRecord(hostname),
+      deleteTunnelRoute(hostname),
+      deleteIngressRoutes(hostname),
+    ]);
     console.log(`Deprovisioned ${hostname}`);
   } catch (err) {
     console.error(`Failed to deprovision ${hostname}:`, err);
@@ -131,11 +140,14 @@ healthServer.listen(config.healthPort, () => {
 // ---------------------------------------------------------------------------
 
 console.log("opencode-cloudflare-operator starting");
-console.log(`  Domain       : ${config.domain}`);
-console.log(`  Route suffix : "${config.routeSuffix}"`);
-console.log(`  Session URL  : <hash>${config.routeSuffix}.${config.domain}`);
-console.log(`  Router svc   : ${config.routerServiceUrl}`);
-console.log(`  Tunnel ID    : ${config.cfTunnelId}`);
+console.log(`  Domain            : ${config.domain}`);
+console.log(`  Route suffix      : "${config.routeSuffix}"`);
+console.log(`  Session URL       : <hash>${config.routeSuffix}.${config.domain}`);
+console.log(`  Router svc        : ${config.routerServiceUrl}`);
+console.log(`  Tunnel ID         : ${config.cfTunnelId}`);
+console.log(`  IngressRoute ns   : ${config.ingressRouteNamespace}`);
+console.log(`  OAuth2 middleware  : ${config.oauth2ChainMiddleware}`);
+console.log(`  Router svc name   : ${config.routerServiceName}`);
 
 void startWatch();
 

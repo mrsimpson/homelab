@@ -40,7 +40,9 @@ export async function findDnsRecord(hostname: string): Promise<string | null> {
 
 /**
  * Create a proxied CNAME DNS record pointing to the Cloudflare tunnel.
- * Idempotent — skips creation if the record already exists.
+ * Idempotent — skips creation if the record already exists (checked via GET
+ * and also by treating the "already exists" POST error as a no-op, handling
+ * the race when two operator replicas try to create the same record).
  */
 export async function createDnsRecord(hostname: string, tunnelCname: string): Promise<void> {
   const existing = await findDnsRecord(hostname);
@@ -49,14 +51,24 @@ export async function createDnsRecord(hostname: string, tunnelCname: string): Pr
     return;
   }
 
-  await cfFetch(`/zones/${config.cfZoneId}/dns_records`, "POST", {
-    type: "CNAME",
-    name: hostname,
-    content: tunnelCname,
-    proxied: true,
-    ttl: 1,
-    comment: "opencode session — managed by opencode-cloudflare-operator",
-  });
+  try {
+    await cfFetch(`/zones/${config.cfZoneId}/dns_records`, "POST", {
+      type: "CNAME",
+      name: hostname,
+      content: tunnelCname,
+      proxied: true,
+      ttl: 1,
+      comment: "opencode session — managed by opencode-cloudflare-operator",
+    });
+  } catch (err) {
+    // Two operator replicas may race — if the record was created between our
+    // GET and POST, treat "already exists" as a success.
+    if (err instanceof Error && err.message.includes("already exists")) {
+      console.log(`DNS record already exists for ${hostname} (created concurrently), skipping`);
+      return;
+    }
+    throw err;
+  }
 
   console.log(`Created DNS record: ${hostname} → ${tunnelCname}`);
 }
@@ -82,18 +94,11 @@ export async function deleteDnsRecord(hostname: string): Promise<void> {
 
 /**
  * Get the tunnel CNAME (e.g. <uuid>.cfargotunnel.com) for the configured tunnel.
+ * The CNAME is always <tunnel-id>.cfargotunnel.com — the Cloudflare API does not
+ * expose a dedicated `cname` field; it is derived directly from the tunnel ID.
  */
-let _tunnelCname: string | null = null;
 export async function getTunnelCname(): Promise<string> {
-  if (_tunnelCname) return _tunnelCname;
-
-  const result = (await cfFetch(
-    `/accounts/${await getAccountId()}/cfd_tunnel/${config.cfTunnelId}`,
-    "GET"
-  )) as { cname: string };
-
-  _tunnelCname = result.cname;
-  return _tunnelCname;
+  return `${config.cfTunnelId}.cfargotunnel.com`;
 }
 
 /** Fetch the account ID from the zone (needed for tunnel API) */

@@ -137,6 +137,12 @@ export function createOpencodeRouter(
           resources: ["persistentvolumeclaims"],
           verbs: ["get", "list", "create"],
         },
+        {
+          // Operator sidecar creates/deletes per-session IngressRoute resources
+          apiGroups: ["traefik.io"],
+          resources: ["ingressroutes"],
+          verbs: ["get", "list", "create", "delete"],
+        },
       ],
     },
     { dependsOn: [ns] }
@@ -308,6 +314,11 @@ export function createOpencodeRouter(
             { name: "DOMAIN", value: homelabConfig.domain },
             { name: "ROUTE_SUFFIX", value: ROUTE_SUFFIX },
             { name: "ROUTER_SERVICE_URL", value: ROUTER_SERVICE_URL },
+            // IngressRoute management — session routes are created in the same namespace
+            // as the opencode-router, reusing its existing oauth2 chain middleware.
+            { name: "INGRESSROUTE_NAMESPACE", value: NAMESPACE },
+            { name: "OAUTH2_CHAIN_MIDDLEWARE", value: `${APP_NAME}-oauth2-chain` },
+            { name: "ROUTER_SERVICE_NAME", value: APP_NAME },
             {
               name: "CF_API_TOKEN",
               valueFrom: {
