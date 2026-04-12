@@ -77,6 +77,13 @@ Consolidate opencode apps: remove the simple ExposedWebApp instance and keep onl
 - [x] Git diff reviewed and approved
 - [x] Comprehensive reference verification completed
 - [x] Changes committed to git
+- [x] Deployment successful (zero downtime)
+- [x] All health checks passing
+- [x] Documentation updated:
+  - [x] opencode-router README: Config namespace updated (opencode: → code:)
+  - [x] opencode-router README: Domain updated (opencode-router. → code.)
+  - [x] opencode app README: Marked as deprecated with link to router
+  - [x] All package documentation current
 
 ### Reference Verification ✅
 All remaining "opencode" references are **LEGITIMATE and NECESSARY**:
@@ -98,7 +105,7 @@ All remaining "opencode" references are **LEGITIMATE and NECESSARY**:
    - `https://opencode.ai/config.json` - Official OpenCode schema
 
 ### Summary
-✅ **Consolidation Complete**
+✅ **Consolidation Complete & Documented**
 - Simple opencode app completely removed
 - Consolidated to opencode-router only, renamed to "code" publicly
 - Public route: `code.no-panic.org` (was `opencode-router.no-panic.org`)
@@ -106,6 +113,9 @@ All remaining "opencode" references are **LEGITIMATE and NECESSARY**:
 - Public export: `codeUrl` (was `opencodeRouterUrl`)
 - Internal K8s infrastructure remains stable
 - All tests pass, no type errors
+- All documentation updated
+- Deployed successfully with zero downtime
+- All dependent services running healthily
 
 ## Key Decisions
 1. Removed ALL backward compatibility constraints for clean consolidation
