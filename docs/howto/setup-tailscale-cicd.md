@@ -71,17 +71,13 @@ sudo tailscale up --advertise-tags=tag:k8s-node
 # Get the Tailscale IP assigned to this node
 tailscale ip -4
 # Example output: 100.70.179.36
+# Note this IP — you'll use it in Step 2 for the kubeconfig server address.
 
-# Get the stable MagicDNS hostname
+# The MagicDNS hostname is useful for reference but NOT for the kubeconfig
+# (GitHub Actions runners can't resolve it — use the IP instead)
 tailscale status --json | python3 -c "import sys,json; print(json.load(sys.stdin)['Self']['DNSName'])"
-# Example output: flinker.han-enigmatic.ts.net.  (drop the trailing dot)
+# Example output: flinker.han-enigmatic.ts.net.
 ```
-
-> **Tip:** Use the **MagicDNS hostname** (`hostname.tailnet-name.ts.net`) rather than the
-> raw IP. If the IP ever changes (e.g. after reinstall), the hostname stays the same and
-> you don't need to update your kubeconfig or GitHub secrets.
-
-Enable MagicDNS in the [Tailscale admin console](https://login.tailscale.com/admin/dns) if not already on.
 
 ### Step 1c: Apply the `tag:k8s-node` tag (if not already applied)
 
@@ -93,26 +89,33 @@ sudo tailscale up --advertise-tags=tag:k8s-node
 
 > **Note:** Tags must be pre-defined in your Tailscale ACL before `tailscale up` accepts them.
 > See Step 4 to add `tagOwners` first if you get an "invalid tag" error.
+```
+
+> **Note:** Use the **raw Tailscale IP** (e.g. `100.70.179.36`) rather than the MagicDNS
+> hostname in the kubeconfig. GitHub Actions runners resolve DNS via their own system resolver
+> (`127.0.0.53`) which does not know Tailscale's MagicDNS — the lookup will fail even though
+> the runner is on the tailnet. The Tailscale IP is stable as long as the device remains
+> in the same tailnet; it only changes if the device is removed and re-added.
 
 ---
 
-## Step 2: Update the kubeconfig to Use the Tailscale Address
+## Step 2: Update the kubeconfig to Use the Tailscale IP
 
 By default, k3s writes a kubeconfig with `server: https://127.0.0.1:6443`.
-This only works locally. Replace it with the node's Tailscale MagicDNS hostname:
+This only works locally. Replace it with the node's Tailscale IP (`tailscale ip -4`):
 
 ```bash
-# On your local machine — copy the current k3s kubeconfig for the homelab context
+# On your local machine — copy the current kubeconfig for the homelab context
 kubectl config view --raw --minify --context=<your-homelab-context> > ~/.kube/config-homelab-ci
 
-# Replace the LAN IP or 127.0.0.1 with the Tailscale MagicDNS hostname
-# (from Step 1b — e.g. flinker.han-enigmatic.ts.net)
-sed -i '' 's|https://192.168.13.5:6443|https://flinker.han-enigmatic.ts.net:6443|g' \
+# Replace the LAN IP with the Tailscale IP (from Step 1b, e.g. 100.70.179.36)
+# Use the IP — NOT the MagicDNS hostname (DNS resolution fails on GH Actions runners)
+sed -i '' 's|https://192.168.13.5:6443|https://100.70.179.36:6443|g' \
   ~/.kube/config-homelab-ci
 
 # Verify
 grep server ~/.kube/config-homelab-ci
-# Should show: server: https://flinker.han-enigmatic.ts.net:6443
+# Should show: server: https://100.70.179.36:6443
 ```
 
 ---

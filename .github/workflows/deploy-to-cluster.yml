@@ -122,9 +122,6 @@ jobs:
           # Tag the ephemeral CI device — your Tailscale ACL can restrict
           # devices with this tag to only reach port 6443 on the cluster node.
           tags: tag:ci
-          # Ephemeral: device is removed from tailnet after the job finishes.
-          # This prevents stale device accumulation on the free tier.
-          ephemeral: true
 
       # Write the kubeconfig so kubectl/Pulumi can reach the cluster API.
       # The server address in the kubeconfig must be the Tailscale hostname/IP
