@@ -185,9 +185,51 @@ pulumi up → kubectl API calls → deploy to cluster
 
 - Tailscale free tier supports up to 100 devices and 3 users — more than sufficient for homelab
 - The Tailscale `tailscale/github-action` action handles the full lifecycle (join + cleanup on job end)
-- k3s kubeconfig by default uses `127.0.0.1` — needs to be updated to use the Tailscale IP/hostname for remote access
+- k3s kubeconfig by default uses `127.0.0.1` — needs to be updated to use the Tailscale IP for remote access
+- **Use the raw Tailscale IP (not MagicDNS hostname)** — GitHub Actions runners cannot resolve MagicDNS via their system resolver (`127.0.0.53`)
 - Pulumi Cloud state backend is already used (ADR 009), so `PULUMI_ACCESS_TOKEN` is the only additional secret needed beyond kubeconfig
-- MagicDNS (Tailscale feature) can give the cluster node a stable hostname like `my-node.tail1234.ts.net`
+- OAuth client scope must be `auth_keys` (not just `devices:write`) — the `tailscale/github-action` uses the OAuth secret directly as an auth key via `tailscale up --auth-key`
+- `tailscale/github-action@v3` does not have an `ephemeral` input — ephemeral behaviour is controlled by the OAuth client scope
+
+## Follow-up: Harden kubeconfig TLS verification
+
+**Status: deferred — pipeline is working with `insecure-skip-tls-verify: true`**
+
+The k3s API server certificate was generated with SANs for `127.0.0.1` and `192.168.13.5`
+only — it does not include the Tailscale IP `100.70.179.36`. As a temporary workaround the
+kubeconfig stored in the `KUBECONFIG` GitHub secret uses `insecure-skip-tls-verify: true`.
+
+To fix properly (requires sudo on `flinker`):
+
+```bash
+# 1. Tell k3s to include the Tailscale IP in future TLS certs
+sudo tee /etc/rancher/k3s/config.yaml <<'EOF'
+tls-san:
+  - 100.70.179.36
+  - 192.168.13.5
+  - 127.0.0.1
+EOF
+
+# 2. Delete only the API server leaf cert (safe — regenerated on restart)
+sudo rm /var/lib/rancher/k3s/server/tls/serving-kube-apiserver.crt \
+        /var/lib/rancher/k3s/server/tls/serving-kube-apiserver.key
+
+# 3. Restart k3s
+sudo systemctl restart k3s
+
+# 4. Verify the new cert includes the Tailscale IP
+echo | openssl s_client -connect 100.70.179.36:6443 2>/dev/null | \
+  openssl x509 -noout -text | grep -A2 "Subject Alternative"
+```
+
+Then rebuild the `KUBECONFIG` secret **without** `insecure-skip-tls-verify`:
+```bash
+kubectl config view --raw --minify --context=flinker > /tmp/homelab-ci.yaml
+sed -i '' 's|https://192.168.13.5:6443|https://100.70.179.36:6443|g' /tmp/homelab-ci.yaml
+KUBECONFIG_B64=$(base64 -i /tmp/homelab-ci.yaml | tr -d '\n')
+gh secret set KUBECONFIG -R mrsimpson/homelab  --body "$KUBECONFIG_B64"
+gh secret set KUBECONFIG -R mrsimpson/opencode --body "$KUBECONFIG_B64"
+```
 
 ---
 *This plan is maintained by the LLM and uses beads CLI for task management. Tool responses provide guidance on which bd commands to use for task management.*
