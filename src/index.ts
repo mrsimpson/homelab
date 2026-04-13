@@ -6,9 +6,6 @@ import * as pulumi from "@pulumi/pulumi";
 export const pulumiProject = pulumi.getProject();
 export const pulumiStack = pulumi.getStack();
 
-// Scoped config for the code app (keys set under the "code" namespace)
-const codeConfig = new pulumi.Config("code");
-
 // Import base infrastructure which sets up all core components
 import { setupBaseInfra } from "@mrsimpson/homelab-base-infra";
 
@@ -52,6 +49,8 @@ logBackupStatus();
 // Export core infrastructure outputs for convenience
 export const tunnelId = baseInfra.cloudflare.tunnelId;
 export const tunnelCname = baseInfra.cloudflare.tunnelCname;
+export const cloudflareZoneId = homelabConfig.cloudflare.zoneId;
+export const domain = homelabConfig.domain;
 
 // OAuth2-Proxy - GitHub authentication proxy
 import { releases as oauth2ProxyReleases } from "@mrsimpson/homelab-core-infrastructure";
@@ -61,7 +60,10 @@ export const oauth2ProxyInstances = oauth2ProxyReleases;
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
+<<<<<<< HEAD
 import { createOpencodeRouter } from "@mrsimpson/homelab-app-opencode-router";
+=======
+>>>>>>> 6273379 (feat(core-components)!: publish to npmjs and enable external app deployment)
 import { AuthType } from "@mrsimpson/homelab-core-components";
 
 const helloWorldApp = createHelloWorld(homelab);
@@ -119,6 +121,7 @@ export const longhornUI = {
   command: "kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80",
 };
 
+<<<<<<< HEAD
 // code — per-user isolated OpenCode instances, protected by GitHub OAuth
 //
 // Each authenticated user gets their own Pod + PVC managed dynamically by the router.
@@ -146,3 +149,5 @@ const codeApp = createOpencodeRouter(homelab, {
   },
 });
 export const codeUrl = codeApp.url;
+=======
+>>>>>>> 6273379 (feat(core-components)!: publish to npmjs and enable external app deployment)
