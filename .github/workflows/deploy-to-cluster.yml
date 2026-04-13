@@ -1,0 +1,151 @@
+name: Deploy to Homelab Cluster
+
+# Reusable workflow for deploying external app repositories to the homelab k3s cluster.
+#
+# ## Pulumi project model
+#
+# A Pulumi "project" (defined by Pulumi.yaml "name:") is the unit of state isolation.
+# Each project has its own checkpoint in Pulumi Cloud; pulumi preview/up only diffs
+# against that project's own last-known state — apps cannot affect each other's resources.
+#
+# External apps are each their own project. They read shared infrastructure (domain,
+# tunnelCname, etc.) via StackReference("mrsimpson/homelab/dev"), but manage their
+# own Kubernetes resources in their own isolated state.
+#
+# The KUBECONFIG and Tailscale secrets point to the shared cluster — all apps land
+# on the same cluster, but each app's state is fully independent.
+#
+# Usage in external repos:
+#
+#   jobs:
+#     deploy:
+#       uses: mrsimpson/homelab/.github/workflows/deploy-to-cluster.yml@main
+#       with:
+#         # "name:" from the app's Pulumi.yaml — NOT "mrsimpson/homelab/dev"
+#         pulumi-stack: mrsimpson/opencode/dev
+#         working-directory: deployment/homelab   # path to the folder with Pulumi.yaml
+#       secrets: inherit
+#
+# Required secrets (set at org or repo level in GitHub):
+#   TS_OAUTH_CLIENT_ID      - Tailscale OAuth client ID (non-expiring)
+#   TS_OAUTH_CLIENT_SECRET  - Tailscale OAuth client secret
+#   KUBECONFIG              - base64-encoded kubeconfig with Tailscale API server address
+#   PULUMI_ACCESS_TOKEN     - Pulumi Cloud access token
+#
+# See docs/howto/setup-tailscale-cicd.md for one-time operator setup instructions.
+# See docs/adr/013-tailscale-cicd-cluster-access.md for architectural rationale.
+
+on:
+  workflow_call:
+    inputs:
+      pulumi-stack:
+        description: >
+          Fully qualified Pulumi stack name: "mrsimpson/<project>/<stack>".
+          The project name comes from the "name:" field in the app's own Pulumi.yaml —
+          this must NOT be "mrsimpson/homelab/dev" (that is the base infra stack read
+          via StackReference, not the stack being deployed).
+          Example: Pulumi.yaml has "name: opencode" → stack is "mrsimpson/opencode/dev".
+        type: string
+        required: true
+
+      working-directory:
+        description: >
+          Path to the directory containing the app's Pulumi.yaml (not the homelab repo).
+          Set this to wherever Pulumi.yaml lives in your external repo.
+          Common layouts: "deployment" (flat) or "deployment/homelab" (nested sub-folder).
+        type: string
+        required: false
+        default: deployment
+
+      pulumi-command:
+        description: >
+          Pulumi command to run. Use "preview" for pull request checks and
+          "up" for merges to the default branch.
+        type: string
+        required: false
+        default: up
+
+      node-version:
+        description: Node.js version to use for the Pulumi TypeScript project.
+        type: string
+        required: false
+        default: '24'
+
+    secrets:
+      TS_OAUTH_CLIENT_ID:
+        description: Tailscale OAuth client ID for joining the tailnet.
+        required: true
+      TS_OAUTH_CLIENT_SECRET:
+        description: Tailscale OAuth client secret for joining the tailnet.
+        required: true
+      KUBECONFIG:
+        description: >
+          base64-encoded kubeconfig. The server address must use the cluster node's
+          Tailscale hostname or IP (not 127.0.0.1).
+          Generate with: base64 -w0 ~/.kube/config
+        required: true
+      PULUMI_ACCESS_TOKEN:
+        description: Pulumi Cloud access token for state backend access.
+        required: true
+
+jobs:
+  deploy:
+    name: pulumi ${{ inputs.pulumi-command }} (${{ inputs.pulumi-stack }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: npm ci
+
+      # Join the Tailscale tailnet so we can reach the cluster's Kubernetes API.
+      # The runner is registered as an ephemeral device and is automatically
+      # removed from the tailnet when the job completes.
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+          # Tag the ephemeral CI device — your Tailscale ACL can restrict
+          # devices with this tag to only reach port 6443 on the cluster node.
+          tags: tag:ci
+          # Ephemeral: device is removed from tailnet after the job finishes.
+          # This prevents stale device accumulation on the free tier.
+          ephemeral: true
+
+      # Write the kubeconfig so kubectl/Pulumi can reach the cluster API.
+      # The server address in the kubeconfig must be the Tailscale hostname/IP
+      # of the k3s node (set once during cluster setup — see setup guide).
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG }}" | base64 --decode > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Verify cluster connectivity
+        run: kubectl cluster-info --request-timeout=10s
+
+      - name: Pulumi ${{ inputs.pulumi-command }}
+        uses: pulumi/actions@v6
+        with:
+          command: ${{ inputs.pulumi-command }}
+          stack-name: ${{ inputs.pulumi-stack }}
+          work-dir: ${{ inputs.working-directory }}
+          # On 'up', refresh state first to avoid drift surprises.
+          # On 'preview', skip refresh for speed.
+          refresh: ${{ inputs.pulumi-command == 'up' }}
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}

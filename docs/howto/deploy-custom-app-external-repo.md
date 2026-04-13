@@ -913,6 +913,173 @@ IMAGE_VERSION=main-abc1234 pulumi up
 
 ---
 
+## Step 9: Automate Deployment via GitHub Actions
+
+Once your app builds and pushes images successfully (Step 4), you can automate the
+`pulumi up` step so every merge to `main` deploys to the cluster automatically.
+
+This uses the **reusable deployment workflow** published in the homelab repository,
+which handles Tailscale connectivity, kubeconfig setup, and Pulumi execution for you.
+
+### 9.1 One-Time Setup (Operator)
+
+Before any external repo can deploy via CI, an operator must complete the Tailscale
+and secrets setup described in [setup-tailscale-cicd.md](./setup-tailscale-cicd.md).
+
+This is a **one-time** setup per cluster. Once done, all app repos can reuse the same
+secrets and workflow.
+
+**Prerequisites (operator checklist):**
+- [ ] Tailscale installed on k3s node and node is on the tailnet
+- [ ] kubeconfig updated to use the Tailscale address
+- [ ] Tailscale OAuth client created
+- [ ] GitHub secrets configured: `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_CLIENT_SECRET`, `KUBECONFIG`, `PULUMI_ACCESS_TOKEN`
+
+### 9.2 Add the Deployment Workflow to Your App Repo
+
+#### Understanding the Pulumi project model
+
+A Pulumi **project** (the `name:` in your `Pulumi.yaml`) is the **unit of state isolation**.
+Each project has its own state checkpoint in Pulumi Cloud. When `pulumi up` runs, it diffs
+against *that project's own last-known state only* — so a deploy from the opencode repo
+cannot affect resources created by the homelab repo or any other app.
+
+All external apps:
+- Are their **own Pulumi project** with their own isolated state
+- Land on the **same shared k3s cluster** (same `KUBECONFIG`)
+- Read shared infrastructure facts (domain, tunnel CNAME, etc.) via
+  `StackReference("mrsimpson/homelab/dev")` — but do not deploy *into* that stack
+- Use the stack name `mrsimpson/<their-project-name>/dev`
+
+So `pulumi-stack` is always `mrsimpson/<name from your Pulumi.yaml>/dev` — **never**
+`mrsimpson/homelab/dev`.
+
+Create `.github/workflows/deploy.yml` in your external app repository:
+
+```yaml
+name: Deploy to Homelab
+
+on:
+  push:
+    branches: [main]       # deploy on merge to main
+  pull_request:
+    branches: [main]       # preview on pull requests
+  workflow_dispatch:       # allow manual trigger
+
+jobs:
+  deploy:
+    uses: mrsimpson/homelab/.github/workflows/deploy-to-cluster.yml@main
+    with:
+      # The "name:" field from your Pulumi.yaml — e.g. if name: opencode → mrsimpson/opencode/dev
+      # This is NOT mrsimpson/homelab/dev (that is the base infra, read via StackReference)
+      pulumi-stack: mrsimpson/my-custom-app/dev
+
+      # Run 'preview' on PRs so you can see changes before merging,
+      # run 'up' on merges to actually deploy.
+      pulumi-command: ${{ github.event_name == 'pull_request' && 'preview' || 'up' }}
+
+      # Path to your Pulumi.yaml — adjust to match your repo layout.
+      # e.g. "deployment" (flat) or "deployment/homelab" (nested sub-folder)
+      working-directory: deployment/homelab
+
+    # Passes TS_OAUTH_CLIENT_ID, TS_OAUTH_CLIENT_SECRET, KUBECONFIG,
+    # and PULUMI_ACCESS_TOKEN from the org/repo secret store.
+    secrets: inherit
+```
+
+### 9.3 How the Full CI/CD Pipeline Works
+
+With both the image build workflow (Step 4) and the deploy workflow (Step 9.2) in place,
+your pipeline looks like this:
+
+```
+git push / git tag
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Job 1: build-and-push (build-and-push.yml)                      │
+│   1. Build Docker image                                          │
+│   2. Scan with Trivy                                             │
+│   3. Push to GHCR (ghcr.io/org/app:sha, :latest, :vX.Y.Z)      │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │ image pushed
+                      ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Job 2: deploy (deploy.yml → deploy-to-cluster.yml)              │
+│   1. Join Tailscale tailnet (ephemeral)                          │
+│   2. Write kubeconfig (uses Tailscale address)                  │
+│   3. pulumi up → updates Deployment image tag in cluster        │
+│   4. Runner leaves tailnet automatically                        │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │
+                      ▼
+         App running at https://myapp.yourdomain.com
+```
+
+### 9.4 Coordinating Image Build and Deployment
+
+To ensure the deployment always picks up the newly built image, chain the two workflows
+so deployment only starts after the image is successfully pushed:
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to Homelab
+
+on:
+  # Trigger after the build workflow completes successfully on main
+  workflow_run:
+    workflows: ["Build and Push to GHCR"]
+    types: [completed]
+    branches: [main]
+  # Also allow manual trigger and PR preview
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    # Only deploy if the triggering build workflow succeeded
+    if: >
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    uses: mrsimpson/homelab/.github/workflows/deploy-to-cluster.yml@main
+    with:
+      pulumi-stack: mrsimpson/my-custom-app/dev
+      pulumi-command: ${{ github.event_name == 'pull_request' && 'preview' || 'up' }}
+    secrets: inherit
+```
+
+### 9.5 Passing the Image Tag to Pulumi
+
+If your Pulumi code reads the image tag from an environment variable or Pulumi config,
+you can pass the exact SHA from the build step. The simplest approach is to use the
+`IMAGE_VERSION` environment variable in your `deployment/index.ts`:
+
+```typescript
+// deployment/index.ts
+const imageVersion = process.env.IMAGE_VERSION ?? "latest";
+
+const app = new ExposedWebApp("my-custom-app", {
+  image: `ghcr.io/my-org/my-custom-app:${imageVersion}`,
+  // ...
+});
+```
+
+Then set it in the workflow:
+
+```yaml
+    with:
+      pulumi-stack: mrsimpson/my-custom-app/dev
+      pulumi-command: up
+    env:
+      IMAGE_VERSION: ${{ github.sha }}  # or the docker metadata output tag
+```
+
+> **Note:** The reusable workflow automatically passes through any `env` variables
+> set by the caller.
+
+---
+
 ## Troubleshooting
 
 ### Image Pull Errors
@@ -1010,14 +1177,17 @@ pulumi stack output
 - [ ] Set up log aggregation (Loki)
 - [ ] Configure alerts (AlertManager)
 - [ ] Add OAuth protection
-- [ ] Set up automated Pulumi deployments via GitHub Actions
+- [x] Set up automated Pulumi deployments via GitHub Actions (see Step 9)
 - [ ] Implement blue-green deployments
 - [ ] Add integration tests
 
 ## References
 
 - [ADR 007: Separate Application Repositories](../adr/007-separate-app-repositories.md)
+- [ADR 013: Tailscale for CI/CD Cluster Access](../adr/013-tailscale-cicd-cluster-access.md)
+- [Setup Tailscale for CI/CD](./setup-tailscale-cicd.md)
 - [Setup GHCR Credentials](./setup-ghcr-credentials.md)
 - [ExposedWebApp Component Documentation](../../packages/core/components/src/ExposedWebApp.ts)
 - [GitHub Container Registry Docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
 - [Pulumi Kubernetes Guide](https://www.pulumi.com/docs/clouds/kubernetes/)
+- [Tailscale GitHub Action](https://github.com/tailscale/github-action)
