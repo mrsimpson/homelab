@@ -72,6 +72,7 @@ for (const [group, emails] of Object.entries(groups)) {
           "reverse-proxy": "true", // Trust X-Forwarded headers from Traefik
           "pass-user-headers": "true", // Pass user headers to backend
           "pass-access-token": "true", // Forward GitHub OAuth token as X-Auth-Request-Token
+          "cookie-csrf-per-request": "true", // Unique CSRF cookie per request — required for parallel sessions (multiple session subdomains open simultaneously)
         },
 
         // Email allowlist configuration
@@ -103,8 +104,11 @@ for (const [group, emails] of Object.entries(groups)) {
       },
     },
     {
-      dependsOn: [oauth2ProxySecret, configMaps[group] as k8s.core.v1.ConfigMap],
-    }
+      dependsOn: [
+        oauth2ProxySecret,
+        configMaps[group] as k8s.core.v1.ConfigMap,
+      ],
+    },
   );
 }
 
