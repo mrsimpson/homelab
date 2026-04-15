@@ -8,7 +8,7 @@
  * - Secrets: GitHub OAuth App credentials
  * - Email ConfigMaps: Group-based allowlists
  * - Helm Releases: Per-group oauth2-proxy instances
- * - Callback HTTPRoute: OAuth redirect endpoint
+ * - Callback IngressRoute: OAuth redirect endpoint (cookie-based group routing)
  * - Shared Redirect Service: Handles 401 redirects for all apps
  * - Example Protected Route: Reference implementation for OAuth2-Proxy protection
  */

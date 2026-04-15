@@ -13,7 +13,7 @@ packages/core/infrastructure/src/oauth2-proxy/
 ├── email-configmaps.ts      ← Per-group email allowlist ConfigMaps
 ├── oauth2-proxy.ts          ← Helm releases (one per group)
 ├── shared-redirect.ts       ← Shared redirect service (handles 401s for ALL apps)
-├── callback-route.ts        ← GitHub OAuth callback HTTPRoute
+├── callback-route.ts        ← GitHub OAuth callback IngressRoute (cookie-based routing)
 ├── example-route.ts         ← Example OAuth2-Proxy protected route (reference)
 └── README.md                ← This file
 ```
@@ -78,12 +78,13 @@ oauth2-shared-redirect (in oauth2-proxy namespace)
     - Saves: 3 Kubernetes resources per app (ConfigMap + Deployment + Service)
 ```
 
-**HTTPRoute** (`callback-route.ts`):
+**IngressRoute** (`callback-route.ts`):
 ```
 oauth2-callback (in oauth2-proxy namespace)
 ├── Hostname: oauth.no-panic.org
 ├── Path: /oauth2/callback
-├── Backend: oauth2-proxy-{group} Service (port 80)
+├── Rules: HeaderRegexp(Cookie, .*_oauth2_{group}_.*_csrf.*) → per-group backend
+├── Fallback: oauth2-proxy-users (default group)
 └── Note: NO auth middleware (must be public for GitHub redirect)
 ```
 
