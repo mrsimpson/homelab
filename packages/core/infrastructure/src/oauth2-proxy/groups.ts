@@ -9,11 +9,27 @@
  * - Its own unique cookie name
  *
  * Workflow to add users:
- * 1. Add email to the appropriate group array
+ * 1. Add email to the appropriate group's emails array
  * 2. Run: pulumi up
  * 3. ConfigMap updates → checksum annotation changes → pod auto-restarts
  */
 
-export const groups: Record<string, string[]> = {
-  users: ["github@beimir.net", "dirk.oberhaus@gmx.de"],
+export interface GroupConfig {
+  emails: string[];
+  /**
+   * GitHub OAuth scopes to request during the login flow.
+   * Omit to use oauth2-proxy's default (user:email).
+   * Example: ["user:email", "read:org", "repo"]
+   */
+  scopes?: string[];
+}
+
+export const groups: Record<string, GroupConfig> = {
+  users: {
+    emails: ["github@beimir.net", "dirk.oberhaus@gmx.de"],
+  },
+  developers: {
+    emails: ["github@beimir.net"],
+    scopes: ["user:email", "repo", "read:org", "workflow", "gist"],
+  },
 };

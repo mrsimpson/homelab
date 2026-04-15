@@ -16,7 +16,7 @@ import { oauth2ProxyNamespace } from "./namespace";
 
 const emailConfigMaps: Record<string, k8s.core.v1.ConfigMap> = {};
 
-for (const [group, emails] of Object.entries(groups)) {
+for (const [group, config] of Object.entries(groups)) {
   emailConfigMaps[group] = new k8s.core.v1.ConfigMap(
     `oauth2-emails-${group}`,
     {
@@ -26,7 +26,7 @@ for (const [group, emails] of Object.entries(groups)) {
       },
       data: {
         // Key name must match oauth2-proxy Chart default
-        restricted_user_access: emails.join("\n"),
+        restricted_user_access: config.emails.join("\n"),
       },
     },
     {

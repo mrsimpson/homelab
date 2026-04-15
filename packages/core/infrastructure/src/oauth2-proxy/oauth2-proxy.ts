@@ -1,7 +1,7 @@
-import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { groups } from "./groups";
+import { buildChecksum, buildEmailContent, buildHelmExtraArgs } from "./helpers";
 import { oauth2ProxyNamespace } from "./namespace";
 import { oauth2ProxySecret } from "./secrets";
 import { configMaps } from "./email-configmaps";
@@ -26,18 +26,15 @@ const domain = homelabConfig.require("domain");
 
 const helmReleases: Record<string, k8s.helm.v3.Release> = {};
 
-for (const [group, emails] of Object.entries(groups)) {
+for (const [group, config] of Object.entries(groups)) {
   // Checksum of email content triggers pod restart when emails change
-  const emailContent = emails.join("\n");
-  const checksum = crypto
-    .createHash("sha256")
-    .update(emailContent)
-    .digest("hex")
-    .slice(0, 12);
+  const emailContent = buildEmailContent(config.emails);
+  const checksum = buildChecksum(emailContent);
 
   helmReleases[group] = new k8s.helm.v3.Release(
     `oauth2-proxy-${group}`,
     {
+      name: `oauth2-proxy-${group}`,
       chart: "oauth2-proxy",
       version: "7.12.x", // Stable version - pinned minor
       repositoryOpts: {
@@ -54,26 +51,7 @@ for (const [group, emails] of Object.entries(groups)) {
         },
 
         // Provider and authentication settings
-        extraArgs: {
-          provider: "github",
-          // NOTE: Do NOT set "email-domain": "*" — it bypasses the email allowlist!
-          // With authenticated-emails-file set, only listed emails are allowed.
-          "redirect-url": `https://oauth.${domain}/oauth2/callback`, // GitHub OAuth callback URL
-          "whitelist-domain": `.${domain}`, // Allow redirects to any subdomain
-          "skip-provider-button": "true", // Skip sign-in page, redirect directly to GitHub
-          "cookie-name": `_oauth2_${group}`, // Unique per group to avoid conflicts
-          "cookie-domain": `.${domain}`, // Wildcard for all subdomains
-          "cookie-secure": "true", // HTTPS only
-          "cookie-httponly": "true", // No JavaScript access
-          "cookie-samesite": "lax", // CSRF protection
-          "cookie-expire": "168h", // 7-day session
-          "cookie-refresh": "1h", // Refresh token hourly
-          "set-xauthrequest": "true", // Set X-Auth-Request headers for downstream apps
-          "reverse-proxy": "true", // Trust X-Forwarded headers from Traefik
-          "pass-user-headers": "true", // Pass user headers to backend
-          "pass-access-token": "true", // Forward GitHub OAuth token as X-Auth-Request-Token
-          "cookie-csrf-per-request": "true", // Unique CSRF cookie per request — required for parallel sessions (multiple session subdomains open simultaneously)
-        },
+        extraArgs: buildHelmExtraArgs(group, config, domain),
 
         // Email allowlist configuration
         authenticatedEmailsFile: {
