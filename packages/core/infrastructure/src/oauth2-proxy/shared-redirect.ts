@@ -25,40 +25,41 @@ export const redirectConfigMap = new k8s.core.v1.ConfigMap(
       namespace: oauth2ProxyNamespace.metadata.name,
     },
     data: {
-      // Generic redirect handler - works for any domain
-      // Receives rd parameter from Traefik errors middleware
+      // Generic redirect handler - works for any domain including dynamic session subdomains.
+      // Traefik errors middleware forwards the original client Host header to this service,
+      // so $http_host always contains the actual hostname the user was trying to reach.
+      // We use this to build the rd= URL dynamically instead of trusting the hardcoded
+      // domain in the query param set by the errors middleware.
       "default.conf": `server {
     listen 8080;
     server_name _;
     
     location / {
-        # Extract redirect URL from query param (passed by Traefik errors middleware)
-        set $redirect_url $arg_rd;
-        
-        # Fallback to root if not present
-        if ($redirect_url = "") {
-            set $redirect_url "/";
-        }
+        # Build rd= URL from the actual Host header so this works for both the main
+        # app domain and any dynamic session subdomains (e.g. <hash>-oc.<domain>).
+        # Traefik's errors middleware forwards the original Host by default, so
+        # $http_host reflects the hostname the user was requesting - not this service.
+        set $rd "https://$http_host$arg_url";
         
         default_type text/html;
         return 200 '<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="refresh" content="0;url=/oauth2/start?rd=$redirect_url">
-    <script>window.location.href="/oauth2/start?rd=$redirect_url";</script>
+    <meta http-equiv="refresh" content="0;url=/oauth2/start?rd=$rd">
+    <script>window.location.href="/oauth2/start?rd=$rd";</script>
     <title>Redirecting to Sign In</title>
 </head>
 <body>
     <p>Redirecting to sign in...</p>
-    <p><a href="/oauth2/start?rd=$redirect_url">Click here if not redirected</a></p>
+    <p><a href="/oauth2/start?rd=$rd">Click here if not redirected</a></p>
 </body>
 </html>';
     }
 }`,
     },
   },
-  { dependsOn: [oauth2ProxyNamespace] }
+  { dependsOn: [oauth2ProxyNamespace] },
 );
 
 // Deployment - runs a single nginx pod to serve redirects
@@ -134,7 +135,7 @@ export const redirectDeployment = new k8s.apps.v1.Deployment(
       },
     },
   },
-  { dependsOn: [redirectConfigMap] }
+  { dependsOn: [redirectConfigMap] },
 );
 
 // Service - exposes redirect handler to Traefik
@@ -161,7 +162,7 @@ export const redirectService = new k8s.core.v1.Service(
       ],
     },
   },
-  { dependsOn: [redirectDeployment] }
+  { dependsOn: [redirectDeployment] },
 );
 
 // Export the service address for use in ExposedWebApp

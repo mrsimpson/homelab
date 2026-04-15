@@ -234,12 +234,18 @@ export class ExposedWebApp extends pulumi.ComponentResource {
   public readonly deployment: k8s.apps.v1.Deployment;
   public readonly service: k8s.core.v1.Service;
   /** Route resource(s): single HTTPRoute (Authelia/NONE) or IngressRoute[] (OAuth2-Proxy) */
-  public readonly route: k8s.apiextensions.CustomResource | k8s.apiextensions.CustomResource[];
+  public readonly route:
+    | k8s.apiextensions.CustomResource
+    | k8s.apiextensions.CustomResource[];
   public readonly forwardAuthMiddleware?: k8s.apiextensions.CustomResource;
   public readonly dnsRecord?: cloudflare.Record;
   public readonly pvc?: k8s.core.v1.PersistentVolumeClaim;
 
-  constructor(name: string, args: ExposedWebAppArgs, opts?: pulumi.ComponentResourceOptions) {
+  constructor(
+    name: string,
+    args: ExposedWebAppArgs,
+    opts?: pulumi.ComponentResourceOptions,
+  ) {
     super("homelab:ExposedWebApp", name, {}, opts);
 
     const childOpts = { parent: this };
@@ -252,7 +258,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     // - "privileged": required when hostPath volumes are present (hostPath is
     //                 forbidden even in baseline per the K8s PSS spec)
     const hasHostPath = args.extraVolumes?.some(
-      (v) => typeof v === "object" && v !== null && "hostPath" in v
+      (v) => typeof v === "object" && v !== null && "hostPath" in v,
     );
     const podSecurityLevel = hasHostPath
       ? "privileged"
@@ -276,7 +282,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             },
           },
         },
-        childOpts
+        childOpts,
       );
     this.namespace = namespace;
 
@@ -337,8 +343,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                   ],
                 },
               },
-              { ...childOpts, dependsOn: externalSecretDeps }
-            )
+              { ...childOpts, dependsOn: externalSecretDeps },
+            ),
           );
         } else if (pullSecret.name === "dockerhub-pull-secret") {
           pullSecretResources.push(
@@ -391,8 +397,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                   ],
                 },
               },
-              { ...childOpts, dependsOn: externalSecretDeps }
-            )
+              { ...childOpts, dependsOn: externalSecretDeps },
+            ),
           );
         }
       });
@@ -417,7 +423,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             },
           },
         },
-        childOpts
+        childOpts,
       );
     }
 
@@ -496,7 +502,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
 
     // Create Deployment
     // Build deployment dependencies - include pull secrets if we created them
-    const deploymentDeps: pulumi.Resource[] = [namespace, ...pullSecretResources];
+    const deploymentDeps: pulumi.Resource[] = [
+      namespace,
+      ...pullSecretResources,
+    ];
 
     this.deployment = new k8s.apps.v1.Deployment(
       `${name}-deployment`,
@@ -528,7 +537,9 @@ export class ExposedWebApp extends pulumi.ComponentResource {
               nodeSelector: args.nodeSelector,
               securityContext: {
                 // Only enforce runAsNonRoot when the image supports it (opt-out via allowRoot)
-                ...(args.securityContext?.allowRoot ? {} : { runAsNonRoot: true }),
+                ...(args.securityContext?.allowRoot
+                  ? {}
+                  : { runAsNonRoot: true }),
                 // When allowRoot is true, omit runAsUser/runAsGroup to let the image use its own UID
                 ...(args.securityContext?.allowRoot
                   ? {}
@@ -542,7 +553,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
               },
               containers: [
                 appContainer,
-                ...((args.extraContainers ?? []) as k8s.types.input.core.v1.Container[]),
+                ...((args.extraContainers ??
+                  []) as k8s.types.input.core.v1.Container[]),
               ],
               initContainers: args.initContainers as
                 | k8s.types.input.core.v1.Container[]
@@ -552,7 +564,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           },
         },
       },
-      { ...childOpts, dependsOn: deploymentDeps }
+      { ...childOpts, dependsOn: deploymentDeps },
     );
 
     // Create Service
@@ -578,7 +590,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           ],
         },
       },
-      { ...childOpts, dependsOn: [this.deployment] }
+      { ...childOpts, dependsOn: [this.deployment] },
     );
 
     // --- Routing & Authentication ---
@@ -611,12 +623,13 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                 "X-Auth-Request-User",
                 "X-Auth-Request-Email",
                 "X-Auth-Request-Groups",
+                "X-Auth-Request-Token",
                 "Set-Cookie",
               ],
             },
           },
         },
-        { ...childOpts, dependsOn: [this.service] }
+        { ...childOpts, dependsOn: [this.service] },
       );
 
       // Use shared redirect service from oauth2-proxy namespace
@@ -641,11 +654,11 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                 namespace: "oauth2-proxy",
                 port: 80,
               },
-              query: pulumi.interpolate`/?rd=https://${args.domain}{url}`,
+              query: "/?url={url}",
             },
           },
         },
-        { ...childOpts, dependsOn: [this.service] }
+        { ...childOpts, dependsOn: [this.service] },
       );
 
       // Chain middleware - errors wraps forwardauth
@@ -667,7 +680,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             },
           },
         },
-        { ...childOpts, dependsOn: [errorsMiddleware, this.forwardAuthMiddleware] }
+        {
+          ...childOpts,
+          dependsOn: [errorsMiddleware, this.forwardAuthMiddleware],
+        },
       );
 
       // IngressRoute 1: /oauth2/* → oauth2-proxy (unprotected, handles sign-in flow)
@@ -698,7 +714,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             ],
           },
         },
-        { ...childOpts, dependsOn: [namespace] }
+        { ...childOpts, dependsOn: [namespace] },
       );
 
       // IngressRoute 2: /* → app backend (protected by middleware chain)
@@ -734,7 +750,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             ],
           },
         },
-        { ...childOpts, dependsOn: [this.service, chainMiddleware, signinRoute] }
+        {
+          ...childOpts,
+          dependsOn: [this.service, chainMiddleware, signinRoute],
+        },
       );
 
       this.route = [signinRoute, appRoute];
@@ -742,7 +761,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       // --- Authelia / NONE: Gateway API HTTPRoute ---
 
       const gatewayName = args.gatewayApi?.gatewayName || "homelab-gateway";
-      const gatewayNamespace = args.gatewayApi?.gatewayNamespace || "traefik-system";
+      const gatewayNamespace =
+        args.gatewayApi?.gatewayNamespace || "traefik-system";
 
       // Build Gateway API dependencies
       const httpRouteDeps: pulumi.Resource[] = [this.service];
@@ -766,7 +786,8 @@ export class ExposedWebApp extends pulumi.ComponentResource {
             },
             spec: {
               forwardAuth: {
-                address: "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
+                address:
+                  "http://authelia.authelia.svc.cluster.local:9091/api/authz/auth-request",
                 trustForwardHeader: true,
                 authRequestHeaders: [
                   "X-Original-URL",
@@ -790,7 +811,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           {
             ...childOpts,
             dependsOn: httpRouteDeps,
-          }
+          },
         );
 
         httpRouteDeps.push(this.forwardAuthMiddleware);
@@ -878,7 +899,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
         {
           ...childOpts,
           dependsOn: httpRouteDeps,
-        }
+        },
       );
     }
 
@@ -899,7 +920,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
           // or when the Pulumi URN changes due to refactoring).
           allowOverwrite: true,
         },
-        childOpts
+        childOpts,
       );
     }
 
