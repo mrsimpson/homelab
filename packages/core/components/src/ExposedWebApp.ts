@@ -623,7 +623,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
                 "X-Auth-Request-User",
                 "X-Auth-Request-Email",
                 "X-Auth-Request-Groups",
-                "X-Auth-Request-Token",
+                "X-Auth-Request-Access-Token",
                 "Set-Cookie",
               ],
             },
