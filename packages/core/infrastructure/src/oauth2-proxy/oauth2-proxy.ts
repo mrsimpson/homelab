@@ -1,4 +1,4 @@
-import * as crypto from "crypto";
+import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { groups } from "./groups";
@@ -71,6 +71,7 @@ for (const [group, emails] of Object.entries(groups)) {
           "set-xauthrequest": "true", // Set X-Auth-Request headers for downstream apps
           "reverse-proxy": "true", // Trust X-Forwarded headers from Traefik
           "pass-user-headers": "true", // Pass user headers to backend
+          "pass-access-token": "true", // Forward GitHub OAuth token as X-Auth-Request-Token
         },
 
         // Email allowlist configuration
