@@ -4,20 +4,22 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/core/components/**'
+      - "packages/core/components/**"
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
         run: npm ci
@@ -26,6 +28,17 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: packages/core/components
+
+      - name: Bump patch version
+        working-directory: packages/core/components
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version patch --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          git add package.json
+          git commit -m "chore(components): bump version to ${VERSION} [skip ci]"
+          git push
 
       - name: Publish
         run: npm publish
