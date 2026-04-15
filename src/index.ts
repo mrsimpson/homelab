@@ -36,10 +36,13 @@ export const storageClasses = {
 
 // Verify storage classes were created (helps ensure longhorn is deployed)
 pulumi
-  .all([persistentStorageClass.metadata.name, uncriticalStorageClass.metadata.name])
+  .all([
+    persistentStorageClass.metadata.name,
+    uncriticalStorageClass.metadata.name,
+  ])
   .apply(([persistentName, uncriticalName]) => {
     pulumi.log.info(
-      `Storage classes exported: persistent=${persistentName}, uncritical=${uncriticalName}`
+      `Storage classes exported: persistent=${persistentName}, uncritical=${uncriticalName}`,
     );
   });
 
@@ -60,10 +63,6 @@ export const oauth2ProxyInstances = oauth2ProxyReleases;
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
-<<<<<<< HEAD
-import { createOpencodeRouter } from "@mrsimpson/homelab-app-opencode-router";
-=======
->>>>>>> 6273379 (feat(core-components)!: publish to npmjs and enable external app deployment)
 import { AuthType } from "@mrsimpson/homelab-core-components";
 
 const helloWorldApp = createHelloWorld(homelab);
@@ -73,17 +72,20 @@ const nodejsDemoApp = createNodejsDemo(homelab);
 export const nodejsDemoUrl = nodejsDemoApp.url;
 
 // Storage validator - simple nginx-based storage test with automatic R2 backups
-export const storageValidatorApp = homelab.createExposedWebApp("storage-validator", {
-  image: "nginxinc/nginx-unprivileged:alpine",
-  domain: "storage-validator.no-panic.org",
-  port: 8080,
-  storage: {
-    size: "1Gi",
-    storageClass: "longhorn-persistent", // Automatically enables R2 backups
-    mountPath: "/usr/share/nginx/html/storage",
+export const storageValidatorApp = homelab.createExposedWebApp(
+  "storage-validator",
+  {
+    image: "nginxinc/nginx-unprivileged:alpine",
+    domain: "storage-validator.no-panic.org",
+    port: 8080,
+    storage: {
+      size: "1Gi",
+      storageClass: "longhorn-persistent", // Automatically enables R2 backups
+      mountPath: "/usr/share/nginx/html/storage",
+    },
+    tags: ["storage", "validation", "persistent", "longhorn", "backup"],
   },
-  tags: ["storage", "validation", "persistent", "longhorn", "backup"],
-});
+);
 export const storageValidatorUrl = "https://storage-validator.no-panic.org";
 
 // Auth Demo App - Simple nginx app to test forward authentication
@@ -118,36 +120,6 @@ export const longhornUIPortForwardCommand =
   "kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80";
 export const longhornUI = {
   accessMethod: "portforward",
-  command: "kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80",
+  command:
+    "kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80",
 };
-
-<<<<<<< HEAD
-// code — per-user isolated OpenCode instances, protected by GitHub OAuth
-//
-// Each authenticated user gets their own Pod + PVC managed dynamically by the router.
-// The router reads X-Auth-Request-Email (forwarded by oauth2-proxy) to identify users.
-//
-// All settings are read from Pulumi config under the "code" namespace.
-// Set config with:
-//   pulumi config set code:routerImage "ghcr.io/mrsimpson/opencode-router:0.0.1-homelab.1"
-//   pulumi config set code:cfOperatorImage "ghcr.io/mrsimpson/opencode-cloudflare-operator:0.1.0-homelab.3"
-//   pulumi config set code:opencodeImage "ghcr.io/mrsimpson/opencode:1.2.27-homelab.6"
-//   pulumi config set code:anthropicApiKey <key> --secret
-//
-const codeApp = createOpencodeRouter(homelab, {
-  routerImage: codeConfig.require("routerImage"),
-  cfOperatorImage: codeConfig.require("cfOperatorImage"),
-  opencodeImage: codeConfig.require("opencodeImage"),
-  anthropicApiKey: codeConfig.requireSecret("anthropicApiKey"),
-  defaultGitRepo: codeConfig.get("defaultGitRepo"),
-  storageSize: codeConfig.get("storageSize") ?? "2Gi",
-  cloudflare: {
-    zoneId: homelabConfig.cloudflare.zoneId,
-    tunnelCname: baseInfra.cloudflare.tunnelCname,
-    tunnelId: baseInfra.cloudflare.tunnelId,
-    apiToken: new pulumi.Config("cloudflare").requireSecret("apiToken"),
-  },
-});
-export const codeUrl = codeApp.url;
-=======
->>>>>>> 6273379 (feat(core-components)!: publish to npmjs and enable external app deployment)
