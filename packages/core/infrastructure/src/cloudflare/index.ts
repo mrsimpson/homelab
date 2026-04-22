@@ -256,3 +256,15 @@ export const cloudflaredDeployment = new k8s.apps.v1.Deployment(
 
 // Export tunnel ID for creating routes
 export const tunnelId = tunnel.id;
+
+// Wildcard DNS record — routes all *.domain traffic through the tunnel.
+// Individual apps no longer need their own DNS records or cloudflare:apiToken.
+export const wildcardDnsRecord = new cloudflare.Record("wildcard-dns", {
+  zoneId: homelabConfig.cloudflare.zoneId,
+  name: `*.${homelabConfig.domain}`,
+  type: "CNAME",
+  content: tunnel.cname,
+  proxied: true,
+  comment: "Managed by Pulumi - wildcard route to tunnel",
+  allowOverwrite: true,
+});
