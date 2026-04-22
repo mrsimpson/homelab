@@ -157,6 +157,12 @@ export interface ExposedWebAppArgs {
   args?: string[];
   /** Environment variables */
   env?: Array<{ name: string; value: string | pulumi.Output<string> }>;
+  /** Inject all keys from Secrets or ConfigMaps as environment variables */
+  envFrom?: Array<{
+    secretRef?: { name: string | pulumi.Output<string> };
+    configMapRef?: { name: string | pulumi.Output<string> };
+    prefix?: string;
+  }>;
   /** Authentication type (defaults to "none") */
   auth?: AuthType;
   /** Persistent storage configuration */
@@ -251,7 +257,6 @@ export class ExposedWebApp extends pulumi.ComponentResource {
     const childOpts = { parent: this };
 
     // Use provided namespace or create a new one
-    const isCreatingNamespace = !args.namespace;
     // Pod Security Standard level for the namespace:
     // - "restricted": default, enforces non-root, no hostPath, etc.
     // - "baseline":   required when allowRoot is set (permits running as UID 0)
@@ -286,10 +291,10 @@ export class ExposedWebApp extends pulumi.ComponentResource {
       );
     this.namespace = namespace;
 
-    // If creating a new namespace AND imagePullSecrets are specified,
-    // automatically create ExternalSecrets for common pull secret names
+    // If imagePullSecrets are specified, automatically create ExternalSecrets
+    // for common pull secret names (e.g. ghcr-pull-secret, dockerhub-pull-secret)
     const pullSecretResources: k8s.apiextensions.CustomResource[] = [];
-    if (isCreatingNamespace && args.imagePullSecrets && args.externalSecrets) {
+    if (args.imagePullSecrets && args.externalSecrets) {
       const storeName = args.externalSecrets.storeName || "pulumi-esc";
 
       // Create dependencies for ExternalSecret
@@ -438,6 +443,7 @@ export class ExposedWebApp extends pulumi.ComponentResource {
         },
       ],
       env: args.env || [],
+      envFrom: args.envFrom || [],
       resources: args.resources || {
         requests: { cpu: "100m", memory: "128Mi" },
         limits: { cpu: "500m", memory: "512Mi" },
