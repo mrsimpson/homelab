@@ -22,6 +22,23 @@ export interface GroupConfig {
    * Example: ["user:email", "read:org", "repo"]
    */
   scopes?: string[];
+  /**
+   * Dedicated GitHub App credentials for this group.
+   * When set, a group-specific K8s Secret is created and used instead of the
+   * shared "oauth2-proxy-github" secret.  This allows groups with elevated
+   * scopes to use a separate GitHub App that has the matching permissions
+   * configured, keeping the shared app minimal (user:email only).
+   *
+   * Values are Pulumi config keys read from the "oauth2-proxy" namespace:
+   *   oauth2-proxy:<clientIdKey>        — GitHub App client ID
+   *   oauth2-proxy:<clientSecretKey>    — GitHub App client secret
+   *   oauth2-proxy:<cookieSecretKey>    — random 32-byte cookie secret
+   */
+  app?: {
+    clientIdKey: string;
+    clientSecretKey: string;
+    cookieSecretKey: string;
+  };
 }
 
 export const groups: Record<string, GroupConfig> = {
@@ -31,5 +48,10 @@ export const groups: Record<string, GroupConfig> = {
   developers: {
     emails: ["github@beimir.net"],
     scopes: ["user:email", "repo", "read:org", "workflow", "gist"],
+    app: {
+      clientIdKey: "developersClientId",
+      clientSecretKey: "developersClientSecret",
+      cookieSecretKey: "developersCookieSecret",
+    },
   },
 };

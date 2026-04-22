@@ -17,17 +17,25 @@ export function buildChecksum(content: string): string {
 }
 
 /**
- * Builds the Helm extraArgs object for an oauth2-proxy release.
- * Pure function — no Pulumi dependencies — so it can be unit-tested.
+ * Returns the OAuth2 callback URL for a given group.
+ * Default group ("users") uses the root path for backwards compatibility.
+ * Other groups use a path prefix so each can be registered as a separate
+ * callback URL in the GitHub App (which supports multiple callback URLs).
  */
+export function callbackUrl(group: string, domain: string): string {
+  return group === "users"
+    ? `https://oauth.${domain}/oauth2/callback`
+    : `https://oauth.${domain}/${group}/oauth2/callback`;
+}
+
 export function buildHelmExtraArgs(
   group: string,
   config: GroupConfig,
-  domain: string
+  domain: string,
 ): Record<string, string> {
   const args: Record<string, string> = {
     provider: "github",
-    "redirect-url": `https://oauth.${domain}/oauth2/callback`,
+    "redirect-url": callbackUrl(group, domain),
     "whitelist-domain": `.${domain}`,
     "skip-provider-button": "true",
     "cookie-name": `_oauth2_${group}`,
