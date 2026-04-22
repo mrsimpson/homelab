@@ -1,6 +1,6 @@
 {
   "name": "@mrsimpson/homelab-core-components",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reusable Pulumi components for secure homelab infrastructure",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
