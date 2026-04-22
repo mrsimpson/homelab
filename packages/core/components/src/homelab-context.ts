@@ -27,18 +27,20 @@ export class HomelabContext {
   constructor(private readonly config: HomelabContextConfig) {}
 
   /**
-   * Creates an ExposedWebApp with infrastructure dependencies automatically injected
+   * Creates an ExposedWebApp with infrastructure dependencies automatically injected.
+   * Cloudflare DNS records are NOT created by default (wildcard DNS covers all subdomains).
+   * Pass `cloudflare` in args to create an explicit DNS record for special cases.
    */
   createExposedWebApp(
     name: string,
-    args: Omit<ExposedWebAppArgs, "cloudflare" | "tls" | "gatewayApi" | "externalSecrets">,
+    args: Omit<ExposedWebAppArgs, "tls" | "gatewayApi" | "externalSecrets">,
     opts?: pulumi.ComponentResourceOptions
   ): ExposedWebApp {
     return new ExposedWebApp(
       name,
       {
         ...args,
-        cloudflare: this.config.cloudflare,
+        cloudflare: args.cloudflare ?? undefined,
         tls: this.config.tls,
         gatewayApi: this.config.gatewayApi,
         externalSecrets: this.config.externalSecrets,
