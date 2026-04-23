@@ -46,7 +46,7 @@ export const groups: Record<string, GroupConfig> = {
     emails: ["github@beimir.net", "dirk.oberhaus@gmx.de"],
   },
   developers: {
-    emails: ["github@beimir.net"],
+    emails: ["github@beimir.net", "dirk.oberhaus@gmx.de", "joschi64@mailbox.org", "utsavanand2@gmail.com"],
     scopes: ["user:email", "repo", "read:org", "workflow", "gist"],
     app: {
       clientIdKey: "developersClientId",
