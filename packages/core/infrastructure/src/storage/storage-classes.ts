@@ -9,7 +9,7 @@ import { longhorn } from "./longhorn";
  * - longhorn-persistent: Retain policy + automatic R2 backups
  *   Use for: Databases, critical data (Supabase, PostgreSQL, etc.)
  *
- * - longhorn-uncritical: Retain policy, NO backups
+ * - longhorn-uncritical: Delete policy, NO backups
  *   Use for: Caches, temporary data, non-critical files
  *
  * Note: Longhorn volume labels must be set via recurring job groups
@@ -58,18 +58,18 @@ export const persistentStorageClass = new k8s.storage.v1.StorageClass(
   },
   {
     dependsOn: [longhorn],
-  }
+  },
 );
 
 /**
  * longhorn-uncritical: For non-critical data without backups
  *
- * - Retain policy: Data is not deleted when PVC is deleted
+ * - Delete policy: Data is deleted when PVC is deleted (no orphaned volumes)
  * - Backup policy: No automatic backups
  * - Binding mode: WaitForFirstConsumer
- * - Use case: Caches, temporary files, build artifacts
+ * - Use case: Caches, temporary files, build artifacts, ephemeral workloads
  *
- * Note: Data is retained but NOT backed up to R2.
+ * Note: Data is NOT retained after PVC deletion and NOT backed up to R2.
  * Use this for data that can be recreated or is not valuable long-term.
  */
 export const uncriticalStorageClass = new k8s.storage.v1.StorageClass(
@@ -84,14 +84,15 @@ export const uncriticalStorageClass = new k8s.storage.v1.StorageClass(
       },
       annotations: {
         "storageclass.kubernetes.io/is-default-class": "false",
-        "homelab/description": "Persistent storage without backups",
+        "homelab/description":
+          "Ephemeral storage without backups — deleted with PVC",
         "homelab/backup-schedule": "none",
         "homelab/retention": "none",
       },
     },
     provisioner: "driver.longhorn.io",
     allowVolumeExpansion: true,
-    reclaimPolicy: "Retain",
+    reclaimPolicy: "Delete",
     volumeBindingMode: "WaitForFirstConsumer",
     parameters: {
       numberOfReplicas: "1",
@@ -104,7 +105,7 @@ export const uncriticalStorageClass = new k8s.storage.v1.StorageClass(
   },
   {
     dependsOn: [longhorn],
-  }
+  },
 );
 
 // Only export the clean, intent-based storage classes
