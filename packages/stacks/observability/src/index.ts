@@ -18,9 +18,24 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { homelabConfig } from "@mrsimpson/homelab-config";
 import { HomelabContext } from "@mrsimpson/homelab-core-components";
+import { createDashboardConfigMaps } from "./dashboards";
 
 const config = new pulumi.Config();
 const grafanaAdminPassword = config.requireSecret("grafanaAdminPassword");
+
+const LLAMA_CPP_HOST = "flinker:8080";
+
+async function fetchLlamaCppModels(): Promise<string[]> {
+  try {
+    const res = await fetch(`http://${LLAMA_CPP_HOST}/v1/models`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { data: { id: string }[] };
+    return data.data.map((m) => m.id);
+  } catch {
+    pulumi.log.warn("Could not reach llama.cpp API — skipping model discovery");
+    return [];
+  }
+}
 
 export interface ObservabilityArgs {
   homelab: HomelabContext;
@@ -122,6 +137,9 @@ export function setupObservability(args: ObservabilityArgs) {
         fullnameOverride: "victoria-metrics",
         server: {
           retentionPeriod: retentionPeriod,
+          extraArgs: {
+            "promscrape.configCheckInterval": "30s",
+          },
           persistentVolume: {
             enabled: true,
             size: metricsStorageSize,
@@ -138,7 +156,7 @@ export function setupObservability(args: ObservabilityArgs) {
               global: {
                 scrape_interval: "30s",
               },
-              scrape_configs: [
+              scrape_configs: pulumi.output(fetchLlamaCppModels()).apply((models) => [
                 // Pods annotated with prometheus.io/scrape=true (covers node-exporter)
                 {
                   job_name: "kubernetes-pods",
@@ -259,15 +277,6 @@ export function setupObservability(args: ObservabilityArgs) {
                     },
                   ],
                 },
-                // llama.cpp — LLM inference server on host flinker
-                {
-                  job_name: "llama-cpp",
-                  static_configs: [
-                    { targets: ["flinker:8080"], labels: { instance: "flinker" } },
-                  ],
-                  metrics_path: "/metrics",
-                  scrape_interval: "30s",
-                },
                 // Longhorn — distributed storage manager metrics
                 {
                   job_name: "longhorn",
@@ -296,7 +305,17 @@ export function setupObservability(args: ObservabilityArgs) {
                     },
                   ],
                 },
-              ],
+                // llama.cpp — one job per model (discovered from /v1/models API)
+                ...models.map((model) => ({
+                  job_name: `llama-cpp-${model.replace(/[^a-z0-9-]/gi, "-")}`,
+                  static_configs: [
+                    { targets: [LLAMA_CPP_HOST], labels: { model } },
+                  ],
+                  metrics_path: "/metrics",
+                  params: { model: [model] },
+                  scrape_interval: "30s",
+                })),
+              ]),
             },
           },
         },
@@ -332,6 +351,37 @@ datasources:
     { dependsOn: [namespace] },
   );
 
+  // Dashboard provisioning — tells Grafana where to load dashboard JSON files
+  const dashboardProviderConfig = new k8s.core.v1.ConfigMap(
+    "grafana-dashboard-provider",
+    {
+      metadata: {
+        name: "grafana-dashboard-provider",
+        namespace: "observability",
+      },
+      data: {
+        "dashboards.yaml": `apiVersion: 1
+providers:
+  - name: default
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
+`,
+      },
+    },
+    { dependsOn: [namespace] },
+  );
+
+  // Dashboard JSON files — loaded from src/dashboards/json/ at build time
+  const { configMaps: dashboardConfigMaps, volumes: dashboardVolumes } =
+    createDashboardConfigMaps(namespace);
+
   // Grafana — routing delegated to HomelabContext (HTTPRoute + DNS via shared infra)
   const grafanaDomain = pulumi.interpolate`grafana.${homelabConfig.domain}`;
   const grafana = args.homelab.createExposedWebApp(
@@ -355,12 +405,22 @@ datasources:
           name: "datasources",
           configMap: { name: datasourceConfig.metadata.name },
         },
+        {
+          name: "dashboard-provider",
+          configMap: { name: dashboardProviderConfig.metadata.name },
+        },
+        ...dashboardVolumes.map((d) => d.volume),
       ],
       extraVolumeMounts: [
         {
           name: "datasources",
           mountPath: "/etc/grafana/provisioning/datasources",
         },
+        {
+          name: "dashboard-provider",
+          mountPath: "/etc/grafana/provisioning/dashboards",
+        },
+        ...dashboardVolumes.map((d) => d.volumeMount),
       ],
       securityContext: {
         runAsUser: 472,
@@ -372,7 +432,14 @@ datasources:
         limits: { cpu: "500m", memory: "256Mi" },
       },
     },
-    { dependsOn: [victoriaMetrics, datasourceConfig] },
+    {
+      dependsOn: [
+        victoriaMetrics,
+        datasourceConfig,
+        dashboardProviderConfig,
+        ...dashboardConfigMaps,
+      ],
+    },
   );
 
   return {

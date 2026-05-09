@@ -88,7 +88,7 @@ for (const [group, config] of Object.entries(groups)) {
         podAnnotations: {
           "checksum/emails": checksum,
           "prometheus.io/scrape": "true",
-          "prometheus.io/port": "4180",
+          "prometheus.io/port": "44180",
         },
         service: {
           type: "ClusterIP",
