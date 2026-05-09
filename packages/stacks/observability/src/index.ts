@@ -259,6 +259,43 @@ export function setupObservability(args: ObservabilityArgs) {
                     },
                   ],
                 },
+                // llama.cpp — LLM inference server on host flinker
+                {
+                  job_name: "llama-cpp",
+                  static_configs: [
+                    { targets: ["flinker:8080"], labels: { instance: "flinker" } },
+                  ],
+                  metrics_path: "/metrics",
+                  scrape_interval: "30s",
+                },
+                // Longhorn — distributed storage manager metrics
+                {
+                  job_name: "longhorn",
+                  kubernetes_sd_configs: [{ role: "pod" }],
+                  relabel_configs: [
+                    {
+                      source_labels: ["__meta_kubernetes_namespace"],
+                      action: "keep",
+                      regex: "longhorn-system",
+                    },
+                    {
+                      source_labels: ["__meta_kubernetes_pod_label_app"],
+                      action: "keep",
+                      regex: "longhorn-manager",
+                    },
+                    {
+                      source_labels: ["__address__"],
+                      action: "replace",
+                      regex: "([^:]+)(?::\\d+)?",
+                      replacement: "$1:9500",
+                      target_label: "__address__",
+                    },
+                    {
+                      source_labels: ["__meta_kubernetes_pod_name"],
+                      target_label: "pod",
+                    },
+                  ],
+                },
               ],
             },
           },

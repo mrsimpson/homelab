@@ -157,6 +157,10 @@ export const cloudflaredDeployment = new k8s.apps.v1.Deployment(
           labels: {
             app: "cloudflared",
           },
+          annotations: {
+            "prometheus.io/scrape": "true",
+            "prometheus.io/port": "2000",
+          },
         },
         spec: {
           // Security context for restricted Pod Security Standard
