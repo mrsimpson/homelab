@@ -1,0 +1,399 @@
+{
+  "title": "llama.cpp Inference",
+  "uid": "llama-cpp",
+  "tags": ["llama.cpp", "llm", "inference"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Throughput",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "title": "Prefill Tokens/s",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(llamacpp:prompt_tokens_total[5m]))",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "green", "value": 500 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Generation Tokens/s",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(llamacpp:tokens_predicted_total[5m]))",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "green", "value": 25 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Requests Processing",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "sum by (model) (llamacpp:requests_processing)",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Requests Queued",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "sum by (model) (llamacpp:requests_deferred)",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Token Throughput Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(llamacpp:prompt_tokens_total[5m]))",
+          "legendFormat": "{{model}} prefill t/s"
+        },
+        {
+          "expr": "sum by (model) (rate(llamacpp:tokens_predicted_total[5m]))",
+          "legendFormat": "{{model}} gen t/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "title": "Decode Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(llamacpp:n_decode_total[5m]))",
+          "legendFormat": "{{model}} decodes/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "title": "Latency",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "collapsed": false
+    },
+    {
+      "title": "Avg Prefill Latency (per token)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "rate(llamacpp:prompt_seconds_total[5m]) / rate(llamacpp:prompt_tokens_total[5m])",
+          "legendFormat": "{{model}} s/token"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "title": "Avg Generation Latency (per token)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "rate(llamacpp:tokens_predicted_seconds_total[5m]) / rate(llamacpp:tokens_predicted_total[5m])",
+          "legendFormat": "{{model}} s/token"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "title": "User Experience",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "collapsed": false
+    },
+    {
+      "title": "Time to First Token (avg)",
+      "description": "Average prompt processing time per request. Lower is better for perceived responsiveness.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "rate(llamacpp:prompt_seconds_total[5m]) / (rate(llamacpp:prompt_tokens_total[5m]) / llamacpp:n_tokens_max) > 0",
+          "legendFormat": "{{model}} TTFT (approx)"
+        },
+        {
+          "expr": "1 / llamacpp:prompt_tokens_seconds > 0",
+          "legendFormat": "{{model}} 1/prefill_tps"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "title": "Inter-Token Latency (generation)",
+      "description": "Time between generated tokens. Determines perceived streaming speed. Lower = smoother UX.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "1 / llamacpp:predicted_tokens_seconds > 0",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Streaming Speed (tokens/s)",
+      "description": "How fast tokens are delivered to the user. Higher = better streaming UX.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "llamacpp:predicted_tokens_seconds > 0",
+          "legendFormat": "{{model}} gen t/s"
+        },
+        {
+          "expr": "llamacpp:prompt_tokens_seconds > 0",
+          "legendFormat": "{{model}} prefill t/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "title": "Capacity",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "collapsed": false
+    },
+    {
+      "title": "Busy Slots per Decode",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 33 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "llamacpp:n_busy_slots_per_decode",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "title": "Max Context Tokens",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 33 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "llamacpp:n_tokens_max",
+          "legendFormat": "{{model}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Total Tokens (Cumulative)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 33 },
+      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "targets": [
+        {
+          "expr": "sum by (model) (llamacpp:prompt_tokens_total + llamacpp:tokens_predicted_total)",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_VICTORIAMETRICS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "VictoriaMetrics", "value": "VictoriaMetrics" },
+        "hide": 2
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "version": 1
+}
