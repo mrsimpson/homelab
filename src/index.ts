@@ -60,6 +60,13 @@ import { releases as oauth2ProxyReleases } from "@mrsimpson/homelab-core-infrast
 
 export const oauth2ProxyInstances = oauth2ProxyReleases;
 
+// Observability stack — VictoriaMetrics + Grafana
+import { setupObservability } from "@mrsimpson/homelab-observability";
+
+const observability = setupObservability({ homelab });
+
+export const grafanaUrl = observability.grafanaUrl;
+
 // Applications - Import and create applications here
 import { createHelloWorld } from "@mrsimpson/homelab-app-hello-world";
 import { createNodejsDemo } from "@mrsimpson/homelab-app-nodejs-demo";
