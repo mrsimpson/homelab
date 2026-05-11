@@ -133,7 +133,9 @@ jobs:
           chmod 600 "$HOME/.kube/config"
 
       - name: Verify cluster connectivity
-        run: kubectl cluster-info --request-timeout=10s
+        # kubectl cluster-info requires cluster-wide read access (kube-system).
+        # Use kubectl version instead — it only calls /version which is unauthenticated.
+        run: kubectl version --request-timeout=10s
 
       - name: Pulumi ${{ inputs.pulumi-command }}
         uses: pulumi/actions@v6
