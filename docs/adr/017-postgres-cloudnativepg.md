@@ -1,65 +1,35 @@
-# ADR-017: PostgreSQL via CloudNativePG
+# ADR-017: Per-app PostgreSQL via CloudNativePG
 
 **Status:** Accepted
 
 ## Context
 
-Apps need persistent PostgreSQL. The previous approach (custom `StatefulSet` per app) required
-manually managing credentials, storage, and image upgrades with no HA path.
+Apps in this homelab need persistent PostgreSQL. Two structural questions arose:
 
-## Decision
+1. **Shared cluster vs. per-app instances** — one central Postgres cluster serving all apps, or one instance per app?
+2. **Operator vs. StatefulSet** — manage Postgres via a Kubernetes operator or hand-roll StatefulSets?
 
-Use the [CloudNativePG (CNPG)](https://cloudnative-pg.io/) operator to manage all PostgreSQL
-instances. Wrap it in a `PostgresInstance` Pulumi `ComponentResource`.
+## Decisions
 
-## Architecture
+### Per-app instances
 
-```
-base-infra stack
-└── cnpg (Helm release, cnpg-system namespace)
-    └── ValidatingWebhookConfiguration  ← validates Cluster CRDs
+Each app gets its own CNPG `Cluster`. A shared cluster would couple app lifecycles, complicate credential management, and create a single failure domain. Per-app instances provide full isolation, independent storage sizing, and a contained blast radius.
 
-app stack
-└── PostgresInstance ComponentResource
-    ├── Cluster CRD  ← CNPG reconciles → pod, PVC, services, secrets
-    │   └── <name>-postgres-app  (CNPG-generated: username/password/uri/...)
-    └── adapter Secret (<name>-postgres-credentials)
-        └── POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD / DATABASE_URL
-```
+### CloudNativePG (CNPG) operator
 
-## Key decisions
+CNPG manages the `Cluster` CRD into pods, PVCs, services, and auto-generated credentials — eliminating StatefulSet boilerplate. Key reasons over a hand-rolled StatefulSet:
 
-**Per-app instances** — isolation, independent storage sizing, independent upgrade path.
+- Automated credential generation and rotation (`<cluster>-app` secret)
+- WAL archiving and backup integration
+- HA via `instances: N` — one field change, no data migration
 
-**Adapter secret** — CNPG generates credentials under its own key names (`uri`, `dbname`, etc.).
-Apps expect `DATABASE_URL`, `POSTGRES_*`. A thin Pulumi-managed secret re-maps them.
+CNPG follows the same operator pattern already established in this repo (cert-manager, ESO, Longhorn): namespace + Helm release in `core/infrastructure`, exported and wired into `base-infra`.
 
-**Image-agnostic component** — `PostgresInstance` has no paradedb-specific defaults. Callers
-declare `postgresUID/GID`, `sharedPreloadLibraries`, and `postInitApplicationSQL` explicitly.
-This keeps the component usable with the official postgres image without any paradedb leakage.
+## Consequences
 
-**`postgresUID/GID` immutable** — CNPG sets ownership on the PVC at bootstrap. Changing it
-requires deleting the cluster (and its PVC) and re-creating from backup.
+- All databases use `longhorn-persistent` (daily R2 backup, 7-day retention).
+- CNPG generates credentials under its own key names; a thin adapter `Secret` re-maps them to `POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD / DATABASE_URL`.
+- `postgresUID/GID` is immutable after cluster creation — changing it requires cluster deletion and restore from backup.
+- `postInitApplicationSQL` runs once at bootstrap as superuser — the only way to pre-install superuser-only extensions so the app user never needs elevated privileges.
 
-**`postInitApplicationSQL` for superuser extensions** — CNPG's app user is intentionally not
-a superuser. Extensions requiring superuser (`vector`, `pg_search`) are pre-installed at
-bootstrap via this field, so app migrations using `CREATE EXTENSION IF NOT EXISTS` are no-ops.
-
-**Explicit Helm release name `"cnpg"`** — prevents hash-based name changes that break the
-Helm ownership annotations CNPG embeds in its CRDs.
-
-## Storage
-
-All databases use `longhorn-persistent` (daily R2 backup, 7-day retention) rather than
-`longhorn-uncritical` (no backups).
-
-## HA path
-
-`instances: 1 → 3` triggers CNPG to provision hot-standby replicas and configure automatic
-failover. No API or credential changes required in the app stack.
-
-## Restore
-
-See [deploy-database.md](../howto/deploy-database.md#restore-runbook-pgdump--cnpg).
-Key gotcha: `pg_dump` preserves the original object owner. After restoring into a CNPG cluster,
-all tables and sequences must be `ALTER ... OWNER TO app`.
+See [deploy-database.md](../howto/deploy-database.md) for usage and the restore runbook.
