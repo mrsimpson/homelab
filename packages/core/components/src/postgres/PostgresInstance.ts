@@ -12,7 +12,7 @@ import * as pulumi from "@pulumi/pulumi";
  */
 
 // CNPG webhook rejects tags that don't start with the PG major version (e.g. "latest-pg18").
-const DEFAULT_IMAGE = "paradedb/paradedb:18-v0.23.4";
+const DEFAULT_IMAGE = "postgres:18";
 const DEFAULT_USERNAME = "app"; // CNPG convention: app user owns the app database
 const DEFAULT_STORAGE_SIZE = "5Gi";
 const DEFAULT_STORAGE_CLASS = "longhorn-persistent";
@@ -31,8 +31,8 @@ export interface PostgresInstanceArgs {
 
   /**
    * Container image for Postgres.
-   * Must start with the PG major version (e.g. `18-v0.23.4`) — CNPG's webhook rejects `latest-pg18`.
-   * @default "paradedb/paradedb:18-v0.23.4"
+   * Must start with the PG major version (e.g. `18`) — CNPG's webhook rejects `latest`.
+   * @default "postgres:18"
    */
   image?: pulumi.Input<string>;
 

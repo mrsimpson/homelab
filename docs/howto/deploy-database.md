@@ -36,7 +36,7 @@ The adapter secret (`<name>-postgres-credentials`) exposes:
 
 | Arg | Default | Notes |
 |---|---|---|
-| `image` | `paradedb/paradedb:18-v0.23.4` | Tag must start with PG major version |
+| `image` | `postgres:18` | Tag must start with PG major version |
 | `storageSize` | `5Gi` | |
 | `storageClass` | `longhorn-persistent` | Daily R2 backup, 7-day retention |
 | `instances` | `1` | Set to `3` for HA — no API changes needed |
