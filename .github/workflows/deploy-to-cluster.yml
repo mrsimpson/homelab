@@ -71,6 +71,16 @@ on:
         required: false
         default: '24'
 
+      npm-lock-file-path:
+        description: >
+          Path to the package-lock.json used for npm cache key hashing.
+          Defaults to "<working-directory>/package-lock.json" which is correct for
+          standalone Pulumi projects. For npm workspace monorepos the lock file lives
+          at the repo root — pass "package-lock.json" in that case.
+        type: string
+        required: false
+        default: ''
+
     secrets:
       TS_OAUTH_CLIENT_ID:
         description: Tailscale OAuth client ID for joining the tailnet.
@@ -105,7 +115,8 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: npm
-          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+          cache-dependency-path: >-
+            ${{ inputs.npm-lock-file-path != '' && inputs.npm-lock-file-path || format('{0}/package-lock.json', inputs.working-directory) }}
 
       - name: Install dependencies
         working-directory: ${{ inputs.working-directory }}

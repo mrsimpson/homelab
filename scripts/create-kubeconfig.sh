@@ -22,6 +22,9 @@
 #
 # Environment Variables:
 #   KUBECONFIG_OUT    Output path for kubeconfig (default: /tmp/<namespace>-ci.kubeconfig)
+#   SERVER_OVERRIDE   Override the cluster server URL (e.g. https://100.70.179.36:6443).
+#                     Useful when your local kubectl context points to the LAN IP but CI
+#                     runners must reach the cluster via the Tailscale IP instead.
 #
 set -euo pipefail
 
@@ -40,10 +43,17 @@ Arguments:
 
 Environment Variables:
   KUBECONFIG_OUT    Output path for kubeconfig (default: /tmp/<namespace>-ci.kubeconfig)
+  SERVER_OVERRIDE   Override the cluster server URL written into the kubeconfig.
+                    Use this when your local kubectl context uses the LAN IP but
+                    CI runners must connect via the Tailscale IP (100.x.x.x).
+                    Example: SERVER_OVERRIDE=https://100.70.179.36:6443
 
 Examples:
   # Basic usage (namespace: my-app, SA: ci)
   ./scripts/create-kubeconfig.sh my-app
+
+  # Generate kubeconfig with Tailscale IP for CI (local kubectl uses LAN IP)
+  SERVER_OVERRIDE=https://100.70.179.36:6443 ./scripts/create-kubeconfig.sh lobehub
 
   # Custom SA name for special apps
   ./scripts/create-kubeconfig.sh code opencode-router
@@ -234,6 +244,16 @@ TOKEN=$(echo "${TOKEN_READY}" | base64 -d)
 step "Getting cluster server URL..."
 SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
 CA_DATA=$(kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+
+# Allow overriding the server URL for CI kubeconfigs.
+# Use this when the local kubectl context points to the LAN IP (e.g. 192.168.x.x)
+# but CI runners must reach the cluster via the Tailscale IP (100.x.x.x).
+if [[ -n "${SERVER_OVERRIDE:-}" ]]; then
+    info "SERVER_OVERRIDE set — replacing server URL:"
+    info "  original : ${SERVER}"
+    info "  override : ${SERVER_OVERRIDE}"
+    SERVER="${SERVER_OVERRIDE}"
+fi
 
 # Step 7: Write kubeconfig
 step "Writing kubeconfig to '${KUBECONFIG_OUT}'..."
