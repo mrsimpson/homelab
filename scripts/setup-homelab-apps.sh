@@ -179,6 +179,13 @@ if [[ "${SKIP_KUBECONFIG}" == "false" ]]; then
       --repo "${REPO}" \
       --body "${KUBECONFIG_B64}"
     info "KUBECONFIG set from ${KUBECONFIG_OUT}"
+    # Shred the kubeconfig file — it contains a non-expiring SA token.
+    # The secret is now in GitHub; the local file is no longer needed.
+    if command -v shred &>/dev/null; then
+      shred -u "${KUBECONFIG_OUT}" 2>/dev/null && info "Kubeconfig file shredded"
+    else
+      rm -f "${KUBECONFIG_OUT}" && info "Kubeconfig file removed (shred not available)"
+    fi
   fi
 else
   info "Skipping KUBECONFIG generation (--skip-kubeconfig)"

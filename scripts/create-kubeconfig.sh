@@ -122,19 +122,27 @@ else
 fi
 
 # Step 3: Create ClusterRole (idempotent)
-# We use a ClusterRole rather than a namespace-scoped Role because:
-#   - homelab-apps is a monorepo: one KUBECONFIG, multiple namespaces in one deploy run
-#   - Pulumi refreshes all stack resources at once; resources like Namespaces and CRDs
-#     (traefik Middleware/IngressRoute, CNPG Cluster, ExternalSecret, PVC) require
-#     cluster-scoped or cross-namespace GET access during the refresh phase
-#   - A single ClusterRoleBinding scoped to the SA in its home namespace is cleaner
-#     than duplicating namespace-scoped Roles across every app namespace
 #
-# The ClusterRole name is globally unique — use a prefix to avoid collisions.
+# RBAC design — two layers:
+#
+#   ClusterRole homelab-ci-deployer  (cluster-scoped resources + CRDs only)
+#     Granted cluster-wide so Pulumi can GET Namespace objects and read/write CRDs
+#     (Traefik, CNPG, ExternalSecrets, Gateway) regardless of which namespace an app
+#     is in. Does NOT include Secrets or RBAC write access — those are too broad at
+#     cluster scope.
+#
+#   Role homelab-ci-secrets  (per namespace, created in Step 4)
+#     Grants Secrets CRUD and RBAC write within one namespace only. This limits the
+#     blast radius of a leaked kubeconfig: an attacker can only read/write secrets
+#     in the namespaces this SA is bound to, not cluster-wide.
+#
+# For a monorepo deploying multiple apps: run create-kubeconfig.sh once per app
+# namespace. Each run creates the per-namespace Role+RoleBinding. The ClusterRole
+# and ClusterRoleBinding are shared (idempotent creates).
 CLUSTERROLE_NAME="homelab-ci-deployer"
 step "Creating ClusterRole '${CLUSTERROLE_NAME}'..."
 if kubectl get clusterrole "${CLUSTERROLE_NAME}" &> /dev/null; then
-    info "ClusterRole '${CLUSTERROLE_NAME}' already exists"
+    info "ClusterRole '${CLUSTERROLE_NAME}' already exists — skipping (apply manually to update rules)"
 else
     kubectl create -f - <<EOF || error "Failed to create ClusterRole"
 apiVersion: rbac.authorization.k8s.io/v1
@@ -144,38 +152,33 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: homelab-create-kubeconfig
 rules:
-# Core resources — full CRUD for deployment workloads
+# Namespaces — cluster-scoped; Pulumi needs GET/LIST during refresh
+- apiGroups: [""]
+  resources: [namespaces]
+  verbs: [get, list, watch, create, update, patch, delete]
+# Core namespace-scoped resources (excluding secrets — see per-namespace Role)
 - apiGroups: [""]
   resources:
-  - namespaces
   - pods
   - pods/log
   - pods/status
   - services
   - configmaps
-  - secrets
   - persistentvolumeclaims
   - serviceaccounts
   - events
   verbs: [get, list, watch, create, update, patch, delete]
 # Apps resources
 - apiGroups: ["apps"]
-  resources:
-  - deployments
-  - replicasets
-  - statefulsets
-  - daemonsets
+  resources: [deployments, replicasets, statefulsets, daemonsets]
   verbs: [get, list, watch, create, update, patch, delete]
 # Batch resources
 - apiGroups: ["batch"]
-  resources:
-  - jobs
-  - cronjobs
+  resources: [jobs, cronjobs]
   verbs: [get, list, watch, create, update, patch, delete]
 # Networking
 - apiGroups: ["networking.k8s.io"]
-  resources:
-  - ingresses
+  resources: [ingresses]
   verbs: [get, list, watch, create, update, patch, delete]
 # Traefik CRDs (IngressRoute, Middleware, etc.)
 - apiGroups: ["traefik.io", "traefik.containo.us"]
@@ -192,12 +195,6 @@ rules:
 # Gateway API (HTTPRoute, Gateway, etc.)
 - apiGroups: ["gateway.networking.k8s.io"]
   resources: ["*"]
-  verbs: [get, list, watch, create, update, patch, delete]
-# RBAC — needed so Pulumi can manage RBAC objects in app namespaces
-- apiGroups: ["rbac.authorization.k8s.io"]
-  resources:
-  - roles
-  - rolebindings
   verbs: [get, list, watch, create, update, patch, delete]
 EOF
     info "ClusterRole '${CLUSTERROLE_NAME}' created"
@@ -229,7 +226,63 @@ EOF
     info "ClusterRoleBinding '${CLUSTERROLEBINDING_NAME}' created"
 fi
 
-# Step 5: Get or create long-lived token Secret
+# Step 5: Create per-namespace Role for Secrets + RBAC (idempotent)
+#
+# Secrets and RBAC write access are scoped to this namespace only.
+# This limits the blast radius if the kubeconfig is ever leaked:
+# an attacker can only read/write secrets within this app's namespace.
+SECRETS_ROLE_NAME="homelab-ci-secrets"
+step "Creating namespace Role '${SECRETS_ROLE_NAME}' in namespace '${NAMESPACE}'..."
+if kubectl get role "${SECRETS_ROLE_NAME}" -n "${NAMESPACE}" &> /dev/null; then
+    info "Role '${SECRETS_ROLE_NAME}' already exists — skipping (apply manually to update rules)"
+else
+    kubectl create -n "${NAMESPACE}" -f - <<EOF || error "Failed to create namespace Role"
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${SECRETS_ROLE_NAME}
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: homelab-create-kubeconfig
+rules:
+# Secrets — scoped to this namespace only (NOT cluster-wide)
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [get, list, watch, create, update, patch, delete]
+# RBAC within namespace — Pulumi may manage Roles for the app
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: [roles, rolebindings]
+  verbs: [get, list, watch, create, update, patch, delete]
+EOF
+    info "Role '${SECRETS_ROLE_NAME}' created in namespace '${NAMESPACE}'"
+fi
+
+# Step 6: Create per-namespace RoleBinding for Secrets Role (idempotent)
+SECRETS_ROLEBINDING_NAME="${SECRETS_ROLE_NAME}:${SA_NAME}"
+step "Creating RoleBinding '${SECRETS_ROLEBINDING_NAME}' in namespace '${NAMESPACE}'..."
+if kubectl get rolebinding "${SECRETS_ROLEBINDING_NAME}" -n "${NAMESPACE}" &> /dev/null; then
+    info "RoleBinding '${SECRETS_ROLEBINDING_NAME}' already exists"
+else
+    kubectl create -n "${NAMESPACE}" -f - <<EOF || error "Failed to create namespace RoleBinding"
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${SECRETS_ROLEBINDING_NAME}
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: homelab-create-kubeconfig
+subjects:
+- kind: ServiceAccount
+  name: ${SA_NAME}
+  namespace: ${NAMESPACE}
+roleRef:
+  kind: Role
+  name: ${SECRETS_ROLE_NAME}
+  apiGroup: rbac.authorization.k8s.io
+EOF
+    info "RoleBinding '${SECRETS_ROLEBINDING_NAME}' created in namespace '${NAMESPACE}'"
+fi
+# Step 7: Get or create long-lived token Secret
 step "Getting token for ServiceAccount '${SA_NAME}'..."
 SECRET_NAME="${SA_NAME}-token"
 
@@ -264,7 +317,7 @@ fi
 
 TOKEN=$(echo "${TOKEN_READY}" | base64 -d)
 
-# Step 6: Get cluster info
+# Step 8: Get cluster info
 step "Getting cluster server URL..."
 SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
 CA_DATA=$(kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
@@ -279,7 +332,7 @@ if [[ -n "${SERVER_OVERRIDE:-}" ]]; then
     SERVER="${SERVER_OVERRIDE}"
 fi
 
-# Step 7: Write kubeconfig
+# Step 9: Write kubeconfig
 step "Writing kubeconfig to '${KUBECONFIG_OUT}'..."
 cat > "${KUBECONFIG_OUT}" <<EOF
 apiVersion: v1
