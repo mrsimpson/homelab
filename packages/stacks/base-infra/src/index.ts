@@ -1,15 +1,8 @@
 /**
  * @mrsimpson/homelab-base-infra
  *
- * Base Infrastructure Stack - Orchestrates all core infrastructure modules
- *
- * This stack sets up:
- * - Cloudflare Tunnel for secure internet exposure
- * - cert-manager for automatic TLS certificates
- * - traefik-gateway for HTTP(S) routing via Gateway API
- * - External Secrets Operator for secret management
- *
- * Exports the infrastructure context that can be used by applications.
+ * Orchestrates all core infrastructure operators and exports a `HomelabContext`
+ * for dependency injection into app stacks.
  */
 
 import * as pulumi from "@pulumi/pulumi";
@@ -32,24 +25,9 @@ export const pulumiStack = pulumi.getStack();
  * ExposedWebApp instances with infrastructure dependencies injected.
  */
 export function setupBaseInfra() {
-  // DEPENDENCY CHAIN FOR BASE INFRASTRUCTURE:
-  // 1. Create core namespaces (cert-manager, traefik-system, external-secrets, cloudflare, longhorn)
-  // 2. Deploy Helm charts in those namespaces
-  // 3. Wait for external-secrets operator to be ready
-  // 4. Create ClusterSecretStore to sync secrets from Pulumi ESC
-  // 5. Create ClusterIssuer for TLS certificate management
-  // 6. Mark base infrastructure as ready
-  //
-  // APP DEPENDENCY CHAIN (handled in ExposedWebApp and per-app code):
-  // 1. Create app namespace (ExposedWebApp)
-  // 2. Create GHCR pull secret in app namespace (ExposedWebApp, if imagePullSecrets specified)
-  // 3. Create app Deployment with imagePullSecrets reference
-
-  // Ensure all core infrastructure namespaces are created before proceeding.
-  // Depend on the NAMESPACE RESOURCES (not Helm charts) to ensure they exist
-  // before any resources try to deploy into them.
-  // This prevents "namespace not found" errors during deployment.
-  // Store as unused to satisfy dependency ordering without additional exports
+  // All namespaces must exist before any Helm charts deploy into them.
+  // The ConfigMap acts as a synchronisation point — app stacks depend on it
+  // via infrastructureReady rather than tracking individual operators.
   const infrastructureReady = new k8s.core.v1.ConfigMap(
     "base-infra-ready",
     {
@@ -68,14 +46,15 @@ export function setupBaseInfra() {
         coreInfra.externalSecretsNamespace,
         coreInfra.cloudflaredNamespace,
         coreInfra.longhornNamespaceResource,
+        coreInfra.cnpgNamespace,
         coreInfra.pulumiEscStore, // ClusterSecretStore must be ready
         coreInfra.letsEncryptIssuer, // ClusterIssuer must be created
+        coreInfra.cnpg, // CNPG operator must be ready before Cluster CRDs can be applied
       ],
     }
   );
 
   // Create HomelabContext for dependency injection into apps
-  // Apps will use this context to access infrastructure dependencies
   const homelabContext = new HomelabContext({
     cloudflare: {
       zoneId: baseInfraConfig.cloudflare.zoneId,
@@ -97,11 +76,9 @@ export function setupBaseInfra() {
     },
   });
 
-  // Export infrastructure details
   return {
     context: homelabContext,
-    infrastructureReady, // Export to ensure dependency ordering
-    // Core infrastructure namespaces - explicitly exported so Pulumi deploys them
+    infrastructureReady,
     namespaces: {
       certManager: coreInfra.certManagerNamespace,
       traefik: coreInfra.traefikNamespace,
@@ -110,7 +87,7 @@ export function setupBaseInfra() {
       longhorn: coreInfra.longhornNamespaceResource,
     },
     storage: {
-      longhorn: coreInfra.longhorn, // Export Longhorn Helm release to ensure it's deployed
+      longhorn: coreInfra.longhorn,
     },
     cloudflare: {
       tunnel: coreInfra.tunnel,
@@ -130,6 +107,9 @@ export function setupBaseInfra() {
     externalSecrets: {
       externalSecretsOperator: coreInfra.externalSecretsOperator,
       clusterSecretStore: coreInfra.pulumiEscStore,
+    },
+    cnpg: {
+      operator: coreInfra.cnpg,
     },
   };
 }

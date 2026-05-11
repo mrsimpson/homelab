@@ -19,3 +19,4 @@ export * from "./registry-secrets";
 export * from "./storage";
 export * from "./authelia";
 export * from "./oauth2-proxy";
+export * from "./cnpg";

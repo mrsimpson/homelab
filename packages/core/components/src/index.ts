@@ -22,3 +22,5 @@ export type {
 } from "./ExposedWebApp";
 export type { HomelabContextConfig } from "./homelab-context";
 export type { CreateImagePullSecretArgs } from "./registry-secrets";
+export { PostgresInstance } from "./postgres/PostgresInstance";
+export type { PostgresInstanceArgs } from "./postgres/PostgresInstance";
