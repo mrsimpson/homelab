@@ -65,9 +65,41 @@ homelab/                          ← Pulumi project (root)
 - 📦 **Infrastructure-as-Code**: Git-versioned, reproducible
 - 🚀 **Production-Ready**: Tested patterns (OAuth, storage, secrets)
 
-## Adding Applications
+## Deploying Personal Apps
 
-Create new app in `packages/apps/my-app/`:
+### Recommended: `homelab-apps` monorepo pattern
+
+For real personal apps (e.g. LobeHub, Vaultwarden, Gitea) use the dedicated
+[`mrsimpson/homelab-apps`](https://github.com/mrsimpson/homelab-apps) monorepo.
+
+**Why a separate repo?**
+- One repo → one secret set (`KUBECONFIG`, `PULUMI_ACCESS_TOKEN`, Tailscale OAuth)
+- No need to fork upstream projects just to carry deployment code
+- Clean separation: this repo is the *framework*, `homelab-apps` is *your apps*
+
+**Structure:**
+```
+homelab-apps/
+├── apps/
+│   └── lobehub/          ← each app is a Pulumi project
+│       ├── Pulumi.yaml
+│       ├── Pulumi.dev.yaml
+│       └── src/index.ts  ← uses @mrsimpson/homelab-core-components
+└── .github/workflows/
+    └── deploy-lobehub.yml  ← calls deploy-to-cluster.yml@main (this repo)
+```
+
+**Bootstrap in one command:**
+```bash
+# from this repo
+./scripts/setup-homelab-apps.sh
+```
+
+**Adding a new app:** Use the **`deploy-homelab-app` skill** in [`homelab-apps/skills/`](https://github.com/mrsimpson/homelab-apps/tree/main/skills/deploy-homelab-app/SKILL.md) — load it in your AI agent and say *"add a new app to homelab-apps"*. It covers workspace scaffolding, RBAC setup, CI workflow, and security considerations.
+
+### Demo apps (in this repo)
+
+The `packages/apps/` folder contains lightweight framework examples:
 
 ```bash
 mkdir -p packages/apps/my-app/src
@@ -75,13 +107,13 @@ mkdir -p packages/apps/my-app/src
 npm install
 ```
 
-Use the `HomelabContext` to deploy:
+Use `@mrsimpson/homelab-core-components`:
 
 ```typescript
-import { createMyApp } from "@mrsimpson/homelab-app-my-app";
+import { createHomelabContextFromStack } from "@mrsimpson/homelab-core-components";
 
-const myApp = createMyApp(homelab);
-export const myAppUrl = myApp.url;
+const homelab = createHomelabContextFromStack(homelabStack);
+homelab.createExposedWebApp("my-app", { ... });
 ```
 
 ## Adding Infrastructure
@@ -92,6 +124,7 @@ Or extend `packages/core/infrastructure/` for reusable modules.
 
 ## Documentation
 
+- **[homelab-apps skills](https://github.com/mrsimpson/homelab-apps/tree/main/skills/)** - AI agent skills for adding and configuring apps (deploy, database, oauth, secrets)
 - **[OAuth2-Proxy Authentication](./docs/OAUTH2_PROXY.md)** - GitHub-based authentication system
 - **[OAuth2-Proxy Examples](./docs/OAUTH2_PROXY_EXAMPLES.md)** - Step-by-step usage examples
 - **[ADRs](./docs/adr/)** - Architecture decisions
