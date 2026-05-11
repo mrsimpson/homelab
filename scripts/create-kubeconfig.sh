@@ -121,88 +121,112 @@ else
     info "ServiceAccount '${SA_NAME}' created"
 fi
 
-# Step 3: Create Role (idempotent)
-ROLE_NAME="${SA_NAME}"
-step "Creating Role '${ROLE_NAME}' in namespace '${NAMESPACE}'..."
-if kubectl get role "${ROLE_NAME}" -n "${NAMESPACE}" &> /dev/null; then
-    info "Role '${ROLE_NAME}' already exists"
+# Step 3: Create ClusterRole (idempotent)
+# We use a ClusterRole rather than a namespace-scoped Role because:
+#   - homelab-apps is a monorepo: one KUBECONFIG, multiple namespaces in one deploy run
+#   - Pulumi refreshes all stack resources at once; resources like Namespaces and CRDs
+#     (traefik Middleware/IngressRoute, CNPG Cluster, ExternalSecret, PVC) require
+#     cluster-scoped or cross-namespace GET access during the refresh phase
+#   - A single ClusterRoleBinding scoped to the SA in its home namespace is cleaner
+#     than duplicating namespace-scoped Roles across every app namespace
+#
+# The ClusterRole name is globally unique — use a prefix to avoid collisions.
+CLUSTERROLE_NAME="homelab-ci-deployer"
+step "Creating ClusterRole '${CLUSTERROLE_NAME}'..."
+if kubectl get clusterrole "${CLUSTERROLE_NAME}" &> /dev/null; then
+    info "ClusterRole '${CLUSTERROLE_NAME}' already exists"
 else
-    kubectl create -n "${NAMESPACE}" -f - <<EOF || error "Failed to create role"
+    kubectl create -f - <<EOF || error "Failed to create ClusterRole"
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: ${ROLE_NAME}
+  name: ${CLUSTERROLE_NAME}
+  labels:
+    app.kubernetes.io/managed-by: homelab-create-kubeconfig
 rules:
-- apiGroups: ["", "apps", "networking.k8s.io"]
+# Core resources — full CRUD for deployment workloads
+- apiGroups: [""]
   resources:
+  - namespaces
   - pods
   - pods/log
   - pods/status
   - services
-  - services/status
   - configmaps
-  - configmaps/status
   - secrets
-  - secrets/status
-  - ingresses
-  - ingresses/status
-  - deployments
-  - deployments/status
-  - replicasets
-  - replicasets/status
-  - statefulsets
-  - statefulsets/status
-  - jobs
-  - jobs/status
-  - cronjobs
-  - cronjobs/status
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-- apiGroups: [""]
-  resources:
-  - pods/exec
-  - pods/attach
-  verbs:
-  - create
-  - delete
-- apiGroups: [""]
-  resources:
+  - persistentvolumeclaims
+  - serviceaccounts
   - events
-  verbs:
-  - get
-  - list
-  - watch
+  verbs: [get, list, watch, create, update, patch, delete]
+# Apps resources
+- apiGroups: ["apps"]
+  resources:
+  - deployments
+  - replicasets
+  - statefulsets
+  - daemonsets
+  verbs: [get, list, watch, create, update, patch, delete]
+# Batch resources
+- apiGroups: ["batch"]
+  resources:
+  - jobs
+  - cronjobs
+  verbs: [get, list, watch, create, update, patch, delete]
+# Networking
+- apiGroups: ["networking.k8s.io"]
+  resources:
+  - ingresses
+  verbs: [get, list, watch, create, update, patch, delete]
+# Traefik CRDs (IngressRoute, Middleware, etc.)
+- apiGroups: ["traefik.io", "traefik.containo.us"]
+  resources: ["*"]
+  verbs: [get, list, watch, create, update, patch, delete]
+# CloudNativePG (CNPG) CRDs
+- apiGroups: ["postgresql.cnpg.io"]
+  resources: ["*"]
+  verbs: [get, list, watch, create, update, patch, delete]
+# External Secrets Operator CRDs
+- apiGroups: ["external-secrets.io"]
+  resources: ["*"]
+  verbs: [get, list, watch, create, update, patch, delete]
+# Gateway API (HTTPRoute, Gateway, etc.)
+- apiGroups: ["gateway.networking.k8s.io"]
+  resources: ["*"]
+  verbs: [get, list, watch, create, update, patch, delete]
+# RBAC — needed so Pulumi can manage RBAC objects in app namespaces
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources:
+  - roles
+  - rolebindings
+  verbs: [get, list, watch, create, update, patch, delete]
 EOF
-    info "Role '${ROLE_NAME}' created"
+    info "ClusterRole '${CLUSTERROLE_NAME}' created"
 fi
 
-# Step 4: Create RoleBinding (idempotent)
-ROLEBINDING_NAME="${SA_NAME}"
-step "Creating RoleBinding '${ROLEBINDING_NAME}' in namespace '${NAMESPACE}'..."
-if kubectl get rolebinding "${ROLEBINDING_NAME}" -n "${NAMESPACE}" &> /dev/null; then
-    info "RoleBinding '${ROLEBINDING_NAME}' already exists"
+# Step 4: Create ClusterRoleBinding (idempotent)
+# Binding name is unique per SA to allow multiple apps with separate SAs.
+CLUSTERROLEBINDING_NAME="${CLUSTERROLE_NAME}:${NAMESPACE}:${SA_NAME}"
+step "Creating ClusterRoleBinding '${CLUSTERROLEBINDING_NAME}'..."
+if kubectl get clusterrolebinding "${CLUSTERROLEBINDING_NAME}" &> /dev/null; then
+    info "ClusterRoleBinding '${CLUSTERROLEBINDING_NAME}' already exists"
 else
-    kubectl create -n "${NAMESPACE}" -f - <<EOF || error "Failed to create rolebinding"
+    kubectl create -f - <<EOF || error "Failed to create ClusterRoleBinding"
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: ${ROLEBINDING_NAME}
+  name: ${CLUSTERROLEBINDING_NAME}
+  labels:
+    app.kubernetes.io/managed-by: homelab-create-kubeconfig
 subjects:
 - kind: ServiceAccount
   name: ${SA_NAME}
   namespace: ${NAMESPACE}
 roleRef:
-  kind: Role
-  name: ${ROLE_NAME}
+  kind: ClusterRole
+  name: ${CLUSTERROLE_NAME}
   apiGroup: rbac.authorization.k8s.io
 EOF
-    info "RoleBinding '${ROLEBINDING_NAME}' created"
+    info "ClusterRoleBinding '${CLUSTERROLEBINDING_NAME}' created"
 fi
 
 # Step 5: Get or create long-lived token Secret
